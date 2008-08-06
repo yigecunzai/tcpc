@@ -15,9 +15,6 @@
 #ifndef I__TCPC_H__
 	#define I__TCPC_H__
 
-/* function return values */
-#define TCPC_SUCCESS		0
-
 /****************************************************************************
  * struct tcpc_server 
  * 	DESCRIPTION: Main data structure for a TCP Server. The application 
@@ -28,34 +25,63 @@
  */
 struct tcpc_server {
 	/* server address information */
-	struct sockaddr_in servAddr;
+	struct sockaddr_in serv_addr;
 
 	/* private pointer. to be used by application */
 	void *priv;
 
+	/* configuration parameters */
+	int max_connections;
+	int listen_backlog;
+
 	/* private members - don't modify directly */
 	int _sock;
 	int _active;
+	pthread_t _listen_thread;
 };
 
 #define CREATE_TCPC_SERVER(name,port) \
 	struct tcpc_server name = { \
-		.servAddr = { \
+		.serv_addr = { \
 			.sin_family = AF_INET, \
 			.sin_addr.s_addr = htonl(INADDR_ANY), \
 			.sin_port = htons(port), \
 		}, \
+		._sock = -1, \
+		.max_connections = 100, \
+		.listen_backlog = 10, \
 	}
 
-static inline void INIT_TCPC_SERVER(struct tcpc_server *s, in_port_t port) {
-	s->_sock = 0;
+static inline void INIT_TCPC_SERVER(struct tcpc_server *s, in_port_t port)
+{
+	s->serv_addr.sin_family = AF_INET;
+	s->serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	s->serv_addr.sin_port = htons(port);
+	s->_sock = -1;
 	s->_active = 0;
+	s->_listen_thread = 0;
 	s->priv = NULL;
-	s->servAddr.sin_family = AF_INET;
-	s->servAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	s->servAddr.sin_port = htons(port);
+	s->max_connections = 100;
+	s->listen_backlog = 10;
+}
+
+static inline int tcpc_server_socket(struct tcpc_server *s)
+{
+	return s->_sock;
 }
 /****************************************************************************/
+
+/* tcpc_open_server
+ * 	DESCRIPTION: Initializes a tcp server by opening the socket. Since
+ * 	nothing other than creation is done, the socket options can be set
+ * 	before tcpc_start_server is called.
+ *
+ * 	RETURN VALUES:
+ * 		0	- everything went as planned
+ * 		errors: errno will be set with specific error information
+ * 		-1	- error creating socket
+ */
+int tcpc_open_server(struct tcpc_server *s);
 
 /* tcpc_start_server
  * 	DESCRIPTION: starts a tcp server as described by a struct tcpc_server.
@@ -65,7 +91,19 @@ static inline void INIT_TCPC_SERVER(struct tcpc_server *s, in_port_t port) {
  * 	callback is NULL.
  *
  * 	RETURN VALUES:
- * 		TCPC_SUCCESS
+ * 		0	- everything went as planned
+ * 		-1	- no socket (no errno. you messed up)
+ * 		errors: errno will be set with specific error information
+ * 		-2	- error binding socket
+ * 		-3	- error setting socket to listen
+ * 		-4	- error creating listen thread
  */
+int tcpc_start_server(struct tcpc_server *s);
+
+/* tcpc_close_server
+ * 	DESCRIPTION: stops and closes tcp server. this will end all threads
+ * 	associated with the server as well.
+ */
+void tcpc_close_server(struct tcpc_server *s);
 
 #endif /* I__TCPC_H__ */
