@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <pthread.h>
 #include <poll.h>
 
@@ -20,7 +22,7 @@
  * 	DESCRIPTION: Main data structure for a TCP Server. The application 
  * 	must allocate one of these for each server it has running. Use the 
  * 	CREATE_TCPC_SERVER() macro for creating statically allocated data
- * 	structures. Use INIT_TCPC_SERVER() to initialize a dynamically 
+ * 	structures. Use tcpc_init_server() to initialize a dynamically 
  * 	allocated data structure, or one you've statically allocated yourself.
  */
 struct tcpc_server {
@@ -52,7 +54,7 @@ struct tcpc_server {
 		.listen_backlog = 10, \
 	}
 
-static inline void INIT_TCPC_SERVER(struct tcpc_server *s, in_port_t port)
+static inline void tcpc_init_server(struct tcpc_server *s, in_port_t port)
 {
 	s->serv_addr.sin_family = AF_INET;
 	s->serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);

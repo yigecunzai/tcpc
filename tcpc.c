@@ -13,8 +13,9 @@
 
 
 /* thread functions */
-static void *listen_thread_routine(struct tcpc_server *s)
+static void *listen_thread_routine(void *arg)
 {
+	struct tcpc_server *s = (struct tcpc_server *)arg;
 	while(s->_active) {
 		pthread_yield();
 	}
