@@ -10,6 +10,7 @@
 
 #include "tcpc.h"
 #include <stdio.h>
+#include <unistd.h>
 
 
 /* thread functions */
@@ -17,7 +18,7 @@ static void *listen_thread_routine(void *arg)
 {
 	struct tcpc_server *s = (struct tcpc_server *)arg;
 	while(s->_active) {
-		pthread_yield();
+		sched_yield();
 	}
 	return NULL;
 }
@@ -28,7 +29,7 @@ int tcpc_open_server(struct tcpc_server *s)
 {
 	int sock = socket(s->serv_addr.sin_family, SOCK_STREAM, 0);
 	if(sock < 0) {
-		perror("tcpc_open_server" " : ");
+		perror("tcpc_open_server");
 		return -1;
 	}
 	s->_sock = sock;
@@ -45,13 +46,13 @@ int tcpc_start_server(struct tcpc_server *s)
 	/* bind the socket to serv_addr */
 	if(bind(s->_sock, (struct sockaddr *) &s->serv_addr,
 			sizeof(s->serv_addr)) < 0) {
-		perror("tcpc_start_server" " : ");
+		perror("tcpc_start_server");
 		return -2;
 	}
 
 	/* set socket to listen for connections */
 	if(listen(s->_sock,s->listen_backlog) < 0) {
-		perror("tcpc_start_server" " : ");
+		perror("tcpc_start_server");
 		return -3;
 	}
 
@@ -59,7 +60,7 @@ int tcpc_start_server(struct tcpc_server *s)
 	s->_active = 1;
 	if(pthread_create(&s->_listen_thread, NULL, &listen_thread_routine, s)
 			!= 0) {
-		perror("tcpc_start_server" " : ");
+		perror("tcpc_start_server");
 		return -4;
 	}
 

@@ -3,19 +3,23 @@
 #include <signal.h>
 #include "tcpc.h"
 
+/* main tcpc server structure */
 static struct tcpc_server test_server;
 
-static volatile end_process = 0;
+/* signal handling */
+static volatile int end_process = 0;
 
 void signal_handler(int sig)
 {
 	end_process = 1;
 }
 
-static const struct sigaction act = {
+static struct sigaction act = {
 	.sa_handler = &signal_handler,
 };
+/*******************/
 
+/* Main Routine */
 int main(int argc,char *argv[])
 {
 	int port;
