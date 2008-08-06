@@ -22,11 +22,26 @@
  * 	allocated data structure, or one you've statically allocated yourself.
  */
 struct tcpc_server {
+	struct sockaddr_in servAddr;
+	int sock;
+	void *priv;
 };
 
-#define CREATE_TCPC_SERVER()
-static inline void INIT_TCPC_SERVER() {
+#define CREATE_TCPC_SERVER(name,port) \
+	struct tcpc_server name = { \
+		.servAddr = { \
+			.sin_family = AF_INET, \
+			.sin_addr.s_addr = htonl(INADDR_ANY), \
+			.sin_port = htons(port), \
+		}, \
+	}
 
+static inline void INIT_TCPC_SERVER(struct tcpc_server *s, in_port_t port) {
+	s->sock = 0;
+	s->priv = NULL;
+	s->servAddr.sin_family = AF_INET;
+	s->servAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	s->servAddr.sin_port = htons(port);
 }
 /****************************************************************************/
 
