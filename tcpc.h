@@ -26,14 +26,22 @@
  * 	from the list.
  */
 struct tcpc_server_conn {
-	struct tcpc_server_conn *_next;
-	struct tcpc_server_conn *_prev;
-
 	/* client address information */
 	struct sockaddr_in client_addr;
 
 	/* private pointer. to be used by application */
 	void *priv;
+
+	/* callbacks */
+	void (*conn_close_h)(struct tcpc_server_conn *);
+
+	/* private members - don't modify directly */
+	int _sock;
+	int _active;
+	pthread_t _client_thread;
+	struct tcpc_server *_parent;
+	struct tcpc_server_conn *_next;
+	struct tcpc_server_conn *_prev;
 };
 /****************************************************************************/
 
@@ -50,6 +58,9 @@ struct tcpc_server {
 	/* private pointer. to be used by application */
 	void *priv;
 
+	/* callbacks */
+	void (*new_conn_h)(struct tcpc_server_conn *);
+
 	/* configuration parameters */
 	int max_connections;
 	int listen_backlog;
@@ -58,8 +69,10 @@ struct tcpc_server {
 	int _sock;
 	pthread_mutex_t _clients_mutex;
 	struct tcpc_server_conn *_clients;
+	int _connection_count;
 	int _active;
 	pthread_t _listen_thread;
+	struct pollfd _listen_poll;
 };
 
 /* tcpc_open_server
@@ -70,14 +83,26 @@ static inline void tcpc_init_server(struct tcpc_server *s, in_port_t port)
 	s->serv_addr.sin_family = AF_INET;
 	s->serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	s->serv_addr.sin_port = htons(port);
+
 	s->_sock = -1;
+
 	pthread_mutex_init(&s->_clients_mutex, NULL);
 	s->_clients = NULL;
+	s->_connection_count = 0;
+
 	s->_active = 0;
 	s->_listen_thread = 0;
+
 	s->priv = NULL;
+
 	s->max_connections = 100;
 	s->listen_backlog = 10;
+
+	s->new_conn_h = NULL;
+
+	s->_listen_poll.fd = -1;
+	s->_listen_poll.events = POLLIN;
+	s->_listen_poll.revents = 0;
 }
 
 /* tcpc_server_socket
@@ -142,8 +167,7 @@ int tcpc_open_server(struct tcpc_server *s);
  * 	DESCRIPTION: starts a tcp server as described by a struct tcpc_server.
  * 	The socket is initialized and set up to listen, and the main listen
  * 	thread is started. The main listen thread waits for connecting clients
- * 	and calls the new connection callback. The routine will fail if this
- * 	callback is NULL.
+ * 	and calls the new connection callback.
  *
  * 	RETURN VALUES:
  * 		0	- everything went as planned
