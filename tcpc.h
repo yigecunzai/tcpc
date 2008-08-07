@@ -37,12 +37,21 @@ struct tcpc_server_conn {
 
 	/* private members - don't modify directly */
 	int _sock;
-	int _active;
+	volatile int _active;
 	pthread_t _client_thread;
+	struct pollfd _poll;
 	struct tcpc_server *_parent;
 	struct tcpc_server_conn *_next;
 	struct tcpc_server_conn *_prev;
 };
+
+/* tcpc_conn_server
+ * 	DESCRIPTION: returns the server handling the connection
+ */
+static inline struct tcpc_server *tcpc_conn_server(struct tcpc_server_conn *c)
+{
+	return c->_parent;
+}
 /****************************************************************************/
 
 /****************************************************************************
@@ -69,10 +78,11 @@ struct tcpc_server {
 	int _sock;
 	pthread_mutex_t _clients_mutex;
 	struct tcpc_server_conn *_clients;
-	int _connection_count;
-	int _active;
+	pthread_mutex_t _conn_count_mutex;
+	int _conn_count;
+	volatile int _active;
 	pthread_t _listen_thread;
-	struct pollfd _listen_poll;
+	struct pollfd _poll;
 };
 
 /* tcpc_open_server
@@ -88,7 +98,8 @@ static inline void tcpc_init_server(struct tcpc_server *s, in_port_t port)
 
 	pthread_mutex_init(&s->_clients_mutex, NULL);
 	s->_clients = NULL;
-	s->_connection_count = 0;
+	pthread_mutex_init(&s->_conn_count_mutex, NULL);
+	s->_conn_count = 0;
 
 	s->_active = 0;
 	s->_listen_thread = 0;
@@ -100,9 +111,9 @@ static inline void tcpc_init_server(struct tcpc_server *s, in_port_t port)
 
 	s->new_conn_h = NULL;
 
-	s->_listen_poll.fd = -1;
-	s->_listen_poll.events = POLLIN;
-	s->_listen_poll.revents = 0;
+	s->_poll.fd = -1;
+	s->_poll.events = POLLIN;
+	s->_poll.revents = 0;
 }
 
 /* tcpc_server_socket
@@ -111,6 +122,14 @@ static inline void tcpc_init_server(struct tcpc_server *s, in_port_t port)
 static inline int tcpc_server_socket(struct tcpc_server *s)
 {
 	return s->_sock;
+}
+
+/* tcpc_server_conn_count
+ * 	DESCRIPTION: returns the connection count for a server
+ */
+static inline int tcpc_server_conn_count(struct tcpc_server *s)
+{
+	return s->_conn_count;
 }
 
 static inline void _tcpc_server_add_client(struct tcpc_server *s,

@@ -25,12 +25,16 @@ void conn_close(struct tcpc_server_conn *c)
 {
 	printf("Closing Connection: %08x\n",
 			ntohl(c->client_addr.sin_addr.s_addr));
+	printf("Connection_Count: %d\n",
+			tcpc_server_conn_count(tcpc_conn_server(c)));
 }
 
 void new_conn(struct tcpc_server_conn *c)
 {
 	printf("New Connection: %08x\n",ntohl(c->client_addr.sin_addr.s_addr));
 	c->conn_close_h = &conn_close;
+	printf("Connection_Count: %d\n",
+			tcpc_server_conn_count(tcpc_conn_server(c)));
 }
 
 /* Main Routine */

@@ -19,16 +19,43 @@
 static void *client_thread_routine(void *arg)
 {
 	struct tcpc_server_conn *c = (struct tcpc_server_conn *)arg;
+	int e;
+
+	c->_poll.fd = c->_sock;
+	c->_poll.events = POLLHUP;
+	c->_poll.revents = 0;
 
 	while(c->_active) {
 		sched_yield();
+		e = poll(&c->_poll, 1, 1);
+		if(e == 0) {
+			/* nothing to do */
+			continue;
+		} else if(e < 0) {
+			/* error */
+			perror("listen_thread");
+			continue;
+		} else {
+			/* client has closed */
+			c->_active = 0;
+		}
 	}
 
 	/* clean up this client */
+	/* call the callback */
 	if(c->conn_close_h) (c->conn_close_h)(c);
+	/* close the socket */
 	close(c->_sock);
+	/* remove from the linked list of clients */
+	_tcpc_server_remove_client(c->_parent, c);
+	/* decrement the connection count in the parent */
+	pthread_mutex_lock(&c->_parent->_conn_count_mutex);
+	c->_parent->_conn_count--;
+	pthread_mutex_unlock(&c->_parent->_conn_count_mutex);
+	/* free the memory */
+	free(c);
 
-	return c;
+	return NULL;
 }
 
 static void *listen_thread_routine(void *arg)
@@ -40,7 +67,7 @@ static void *listen_thread_routine(void *arg)
 
 	while(s->_active) {
 		sched_yield();
-		e = poll(&s->_listen_poll, 1, 1);
+		e = poll(&s->_poll, 1, 1);
 		if(e == 0) {
 			/* nothing to do */
 			continue;
@@ -50,7 +77,7 @@ static void *listen_thread_routine(void *arg)
 			continue;
 		} else {
 			/* client is trying to connect */
-			if(s->_connection_count >= s->max_connections)
+			if(s->_conn_count >= s->max_connections)
 				continue;
 			/* get a connection structure */
 			nc = (struct tcpc_server_conn *)
@@ -72,12 +99,13 @@ static void *listen_thread_routine(void *arg)
 			}
 			/* fill in the parent pointer */
 			nc->_parent = s;
-			/* call callback */
-			if(s->new_conn_h)
-				(s->new_conn_h)(nc);
 			/* add connection to list */
 			_tcpc_server_add_client(s, nc);
-			s->_connection_count++;
+			pthread_mutex_lock(&s->_conn_count_mutex);
+			s->_conn_count++;
+			pthread_mutex_unlock(&s->_conn_count_mutex);
+			/* call callback */
+			if(s->new_conn_h) (s->new_conn_h)(nc);
 			/* start the client thread */
 			nc->_active = 1;
 			if(pthread_create(&nc->_client_thread, NULL, 
@@ -93,13 +121,15 @@ static void *listen_thread_routine(void *arg)
 	}
 
 	/* clean up clients */
+	pthread_mutex_lock(&s->_clients_mutex);
 	while(s->_clients) {
-		struct tcpc_server_conn *t = s->_clients;
-		t->_active = 0;
-		pthread_join(t->_client_thread, NULL);
-		_tcpc_server_remove_client(t->_parent, t);
-		free(t);
+		pthread_t ct = s->_clients->_client_thread;
+		s->_clients->_active = 0;
+		pthread_mutex_unlock(&s->_clients_mutex);
+		pthread_join(ct, NULL);
+		pthread_mutex_lock(&s->_clients_mutex);
 	}
+	pthread_mutex_unlock(&s->_clients_mutex);
 
 	return NULL;
 }
@@ -114,7 +144,7 @@ int tcpc_open_server(struct tcpc_server *s)
 		return -1;
 	}
 	s->_sock = sock;
-	s->_listen_poll.fd = sock;
+	s->_poll.fd = sock;
 
 	return 0;
 }
@@ -160,5 +190,5 @@ void tcpc_close_server(struct tcpc_server *s)
 	pthread_join(s->_listen_thread, NULL);
 	close(s->_sock);
 	s->_sock = -1;
-	s->_listen_poll.fd = -1;
+	s->_poll.fd = -1;
 }
