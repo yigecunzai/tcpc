@@ -40,7 +40,7 @@ static void *listen_thread_routine(void *arg)
 
 	while(s->_active) {
 		sched_yield();
-		e = poll(&s->_listen_poll, 1, 10);
+		e = poll(&s->_listen_poll, 1, 1);
 		if(e == 0) {
 			/* nothing to do */
 			continue;
