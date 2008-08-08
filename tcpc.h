@@ -46,7 +46,6 @@ struct tcpc_server_conn {
 	/* private members - don't modify directly */
 	int _sock;
 	volatile int _active;
-	size_t _cur_rxbuf_sz;
 	pthread_t _client_thread;
 	struct pollfd _poll;
 	struct tcpc_server *_parent;
