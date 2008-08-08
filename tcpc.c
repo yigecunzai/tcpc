@@ -19,31 +19,26 @@
 static void *client_thread_routine(void *arg)
 {
 	struct tcpc_server_conn *c = (struct tcpc_server_conn *)arg;
-	int e;
 
 	c->_poll.fd = c->_sock;
-	c->_poll.events = POLLHUP;
-	c->_poll.revents = 0;
+	c->_poll.events = POLLRDHUP;
 
 	while(c->_active) {
 		sched_yield();
-		e = poll(&c->_poll, 1, 1);
-		if(e == 0) {
-			/* nothing to do */
-			continue;
-		} else if(e < 0) {
+		c->_poll.revents = 0;
+		if(poll(&c->_poll, 1, 1) < 0) {
 			/* error */
 			perror("listen_thread");
 			continue;
-		} else {
+		}
+		/* handle the revents */
+		if(c->_poll.revents & POLLRDHUP) {
 			/* client has closed */
 			c->_active = 0;
 		}
 	}
 
 	/* clean up this client */
-	/* call the callback */
-	if(c->conn_close_h) (c->conn_close_h)(c);
 	/* close the socket */
 	close(c->_sock);
 	/* remove from the linked list of clients */
@@ -52,6 +47,8 @@ static void *client_thread_routine(void *arg)
 	pthread_mutex_lock(&c->_parent->_conn_count_mutex);
 	c->_parent->_conn_count--;
 	pthread_mutex_unlock(&c->_parent->_conn_count_mutex);
+	/* call the callback */
+	if(c->conn_close_h) (c->conn_close_h)(c);
 	/* free the memory */
 	free(c);
 
