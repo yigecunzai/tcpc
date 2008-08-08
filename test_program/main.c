@@ -1,18 +1,20 @@
+#include "tcpc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-#include "tcpc.h"
+#include <pthread.h>
 
 
 /* main tcpc server structure */
 static struct tcpc_server test_server;
 
 /* signal handling */
-static volatile int end_process = 0;
+static pthread_cond_t end_process = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t end_process_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void signal_handler(int sig)
 {
-	end_process = 1;
+	pthread_cond_broadcast(&end_process);
 }
 
 static struct sigaction act = {
@@ -56,7 +58,6 @@ int main(int argc,char *argv[])
 
 	sigaction(SIGQUIT, &act, NULL);
 	sigaction(SIGINT, &act, NULL);
-	sigaction(SIGKILL, &act, NULL);
 	sigaction(SIGTERM, &act, NULL);
 
 	printf("Starting server on port: %d\n",port);
@@ -70,7 +71,9 @@ int main(int argc,char *argv[])
 	if(tcpc_start_server(&test_server) < 0)
 		return 1;
 
-	while(!end_process);
+	pthread_mutex_lock(&end_process_mutex);
+	pthread_cond_wait(&end_process, &end_process_mutex);
+	pthread_mutex_unlock(&end_process_mutex);
 
 	printf("Stopping server\n");
 
