@@ -21,7 +21,7 @@ static void *client_thread_routine(void *arg)
 	struct tcpc_server_conn *c = (struct tcpc_server_conn *)arg;
 
 	c->_poll.fd = c->_sock;
-	c->_poll.events = POLLRDHUP;
+	c->_poll.events = POLLRDHUP | POLLIN;
 
 	while(c->_active) {
 		sched_yield();
@@ -32,6 +32,17 @@ static void *client_thread_routine(void *arg)
 			continue;
 		}
 		/* handle the revents */
+		if(c->_poll.revents & POLLIN) {
+			/* data available */
+			ssize_t l;
+			if((l=recv(c->_sock, c->rxbuf, c->rxbuf_sz, 0)) < 0) {
+				/* error */
+				perror("listen_thread");
+				continue;
+			} else {
+				if(c->new_data_h) (c->new_data_h)(c, (size_t)l);
+			}
+		}
 		if(c->_poll.revents & POLLRDHUP) {
 			/* client has closed */
 			c->_active = 0;
@@ -101,8 +112,20 @@ static void *listen_thread_routine(void *arg)
 			pthread_mutex_lock(&s->_conn_count_mutex);
 			s->_conn_count++;
 			pthread_mutex_unlock(&s->_conn_count_mutex);
+			/* set the default buffer size */
+			nc->rxbuf_sz = TCPC_DEFAULT_BUF_SZ;
 			/* call callback */
 			if(s->new_conn_h) (s->new_conn_h)(nc);
+			/* allocate client buffers */
+			nc->rxbuf = (uint8_t *)malloc(nc->rxbuf_sz);
+			if(!nc->rxbuf) {
+				perror("listen_thread");
+				if(nc->conn_close_h) (nc->conn_close_h)(nc);
+				close(nc->_sock);
+				_tcpc_server_remove_client(nc->_parent, nc);
+				free(nc);
+				continue;
+			}
 			/* start the client thread */
 			nc->_active = 1;
 			if(pthread_create(&nc->_client_thread, NULL, 

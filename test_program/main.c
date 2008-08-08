@@ -29,10 +29,16 @@ void conn_close(struct tcpc_server_conn *c)
 			tcpc_server_conn_count(tcpc_conn_server(c)));
 }
 
+void new_data(struct tcpc_server_conn *c, size_t len)
+{
+	printf("New Data: %d\n",len);
+}
+
 void new_conn(struct tcpc_server_conn *c)
 {
 	printf("New Connection: %08x\n",ntohl(c->client_addr.sin_addr.s_addr));
 	c->conn_close_h = &conn_close;
+	c->new_data_h = &new_data;
 	printf("Connection_Count: %d\n",
 			tcpc_server_conn_count(tcpc_conn_server(c)));
 }

@@ -18,6 +18,8 @@
 #ifndef I__TCPC_H__
 	#define I__TCPC_H__
 
+#define TCPC_DEFAULT_BUF_SZ	1024
+
 /****************************************************************************
  * struct tcpc_server_conn
  * 	DESCRIPTION: TCPC server connection data structure. Linked list data
@@ -30,15 +32,21 @@ struct tcpc_server_conn {
 	/* client address information */
 	struct sockaddr_in client_addr;
 
+	/* data buffers */
+	size_t rxbuf_sz;
+	uint8_t *rxbuf;
+
 	/* private pointer. to be used by application */
 	void *priv;
 
 	/* callbacks */
 	void (*conn_close_h)(struct tcpc_server_conn *);
+	void (*new_data_h)(struct tcpc_server_conn *, size_t len);
 
 	/* private members - don't modify directly */
 	int _sock;
 	volatile int _active;
+	size_t _cur_rxbuf_sz;
 	pthread_t _client_thread;
 	struct pollfd _poll;
 	struct tcpc_server *_parent;
