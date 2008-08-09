@@ -23,6 +23,7 @@ static struct sigaction act = {
 /*******************/
 
 /* callbacks */
+/* called when a client connection is closed */
 void conn_close(struct tcpc_server_conn *c)
 {
 	printf("Closing Connection: %08x\n",
@@ -31,6 +32,7 @@ void conn_close(struct tcpc_server_conn *c)
 			tcpc_server_conn_count(tcpc_conn_server(c)));
 }
 
+/* called when a client connection has new data */
 void new_data(struct tcpc_server_conn *c, size_t len)
 {
 	printf("New Data: %d\n",len);
@@ -38,9 +40,11 @@ void new_data(struct tcpc_server_conn *c, size_t len)
 		perror("Could not send data");
 }
 
+/* called when a new client has connected */
 void new_conn(struct tcpc_server_conn *c)
 {
 	printf("New Connection: %08x\n",ntohl(c->client_addr.sin_addr.s_addr));
+	/* a new client has connected, so fill in the callbacks */
 	c->conn_close_h = &conn_close;
 	c->new_data_h = &new_data;
 	printf("Connection_Count: %d\n",
@@ -53,32 +57,45 @@ int main(int argc,char *argv[])
 	int port;
 	int one = 1;
 
+	/* stupid argument checking to grab the port off the command line */
 	if(argc != 2)
 		return 1;
-
+	/* grab the port */
 	port = atoi(argv[1]);
 
+	/* set up the signal handlers so we can shut down cleanly if given the
+	 * chance
+	 */
 	sigaction(SIGQUIT, &act, NULL);
 	sigaction(SIGINT, &act, NULL);
 	sigaction(SIGTERM, &act, NULL);
 
 	printf("Starting server on port: %d\n",port);
 
+	/* initialize our server structure */
 	tcpc_init_server(&test_server, (in_port_t)port);
+	/* set the new connection callback */
 	test_server.new_conn_h = &new_conn;
+	/* open the server. this basically just opens the socket */
 	if(tcpc_open_server(&test_server) < 0)
 		return 1;
+	/* set some socket options. see SETSOCKOPT(2) */
 	setsockopt(tcpc_server_socket(&test_server), SOL_SOCKET, SO_REUSEADDR, 
 			&(one), sizeof(one));
+	/* start the server. after this point the server is live and the
+	 * listening thread has been started
+	 */
 	if(tcpc_start_server(&test_server) < 0)
 		return 1;
 
+	/* just sit and wait for someone to shut us down */
 	pthread_mutex_lock(&end_process_mutex);
 	pthread_cond_wait(&end_process, &end_process_mutex);
 	pthread_mutex_unlock(&end_process_mutex);
 
 	printf("Stopping server\n");
 
+	/* closes all client connections and closes the socket */
 	tcpc_close_server(&test_server);
 
 	return 0;
