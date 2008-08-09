@@ -48,12 +48,15 @@ static void *client_thread_routine(void *arg)
 		if(c->_poll.revents & POLLIN) {
 			/* data available */
 			ssize_t l;
-			if((l=recv(c->_sock, c->rxbuf, c->rxbuf_sz, 0)) < 0) {
+			pthread_mutex_lock(&c->rxbuf_mutex);
+			l=recv(c->_sock, c->rxbuf, c->rxbuf_sz, 0);
+			pthread_mutex_unlock(&c->rxbuf_mutex);
+			if(l < 0) {
 				/* error */
 				perror("listen_thread");
 				continue;
-			} else {
-				if(c->new_data_h) (c->new_data_h)(c, (size_t)l);
+			} else if(l > 0 && c->new_data_h) {
+				(c->new_data_h)(c, (size_t)l);
 			}
 		}
 		if(c->_poll.revents & POLLRDHUP) {
@@ -72,7 +75,8 @@ static void *client_thread_routine(void *arg)
 	c->_parent->_conn_count--;
 	pthread_mutex_unlock(&c->_parent->_conn_count_mutex);
 	/* call the callback */
-	if(c->conn_close_h) (c->conn_close_h)(c);
+	if(c->conn_close_h)
+		(c->conn_close_h)(c);
 	/* free the memory */
 	free(c);
 
@@ -127,13 +131,17 @@ static void *listen_thread_routine(void *arg)
 			pthread_mutex_unlock(&s->_conn_count_mutex);
 			/* set the default buffer size */
 			nc->rxbuf_sz = TCPC_DEFAULT_BUF_SZ;
+			/* initialize the rx buffer mutex */
+			pthread_mutex_init(&nc->rxbuf_mutex, NULL);
 			/* call callback */
-			if(s->new_conn_h) (s->new_conn_h)(nc);
+			if(s->new_conn_h)
+				(s->new_conn_h)(nc);
 			/* allocate client buffers */
 			nc->rxbuf = (uint8_t *)malloc(nc->rxbuf_sz);
 			if(!nc->rxbuf) {
 				perror("listen_thread");
-				if(nc->conn_close_h) (nc->conn_close_h)(nc);
+				if(nc->conn_close_h)
+					(nc->conn_close_h)(nc);
 				close(nc->_sock);
 				_tcpc_server_remove_client(nc->_parent, nc);
 				free(nc);
@@ -144,7 +152,8 @@ static void *listen_thread_routine(void *arg)
 			if(pthread_create(&nc->_client_thread, NULL, 
 					&client_thread_routine, nc) != 0) {
 				perror("listen_thread");
-				if(nc->conn_close_h) (nc->conn_close_h)(nc);
+				if(nc->conn_close_h)
+					(nc->conn_close_h)(nc);
 				close(nc->_sock);
 				_tcpc_server_remove_client(nc->_parent, nc);
 				free(nc);

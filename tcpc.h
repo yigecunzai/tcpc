@@ -50,6 +50,7 @@ struct tcpc_server_conn {
 	/* data buffers */
 	size_t rxbuf_sz;
 	uint8_t *rxbuf;
+	pthread_mutex_t rxbuf_mutex;
 
 	/* private pointer. to be used by application */
 	void *priv;
