@@ -40,12 +40,13 @@
  * 	DESCRIPTION: TCPC server connection data structure. Linked list data
  * 	structure that contains the information about a current connection to
  * 	the server. These are dynamically allocated by the TCPC server
- * 	listening thread, and freed when a client is disconnected and removed
- * 	from the list.
+ * 	listening thread, and freed when a connection is disconnected and 
+ * 	removed from the list. rxbuf_sz can be set to a desired value during 
+ * 	the new_conn_h callback.
  */
 struct tcpc_server_conn {
-	/* client address information */
-	struct sockaddr_in client_addr;
+	/* connection address information */
+	struct sockaddr_in conn_addr;
 
 	/* data buffers */
 	size_t rxbuf_sz;
@@ -62,7 +63,7 @@ struct tcpc_server_conn {
 	/* private members - don't modify directly */
 	int _sock;
 	volatile int _active;
-	pthread_t _client_thread;
+	pthread_t _server_conn_thread;
 	struct pollfd _poll;
 	struct tcpc_server *_parent;
 	struct tcpc_server_conn *_next;
@@ -99,13 +100,17 @@ struct tcpc_server {
 	int listen_backlog;
 
 	/* private members - don't modify directly */
-	int _sock;
-	pthread_mutex_t _clients_mutex;
-	struct tcpc_server_conn *_clients;
-	pthread_mutex_t _conn_count_mutex;
-	int _conn_count;
-	volatile int _active;
+	int _sock; /* server socket */
+
+	pthread_mutex_t _conn_ll_mutex; /* connection linked list mutex */
+	struct tcpc_server_conn *_conns_ll; /* connection linked list */
+
+	pthread_mutex_t _conn_count_mutex; /* connection count mutex */
+	int _conn_count; /* master connection count for server */
+
+	volatile int _active; /* server will listen until false */
 	pthread_t _listen_thread;
+
 	struct pollfd _poll;
 };
 
@@ -120,8 +125,8 @@ static inline void tcpc_init_server(struct tcpc_server *s, in_port_t port)
 
 	s->_sock = -1;
 
-	pthread_mutex_init(&s->_clients_mutex, NULL);
-	s->_clients = NULL;
+	pthread_mutex_init(&s->_conn_ll_mutex, NULL);
+	s->_conns_ll = NULL;
 	pthread_mutex_init(&s->_conn_count_mutex, NULL);
 	s->_conn_count = 0;
 
@@ -156,28 +161,28 @@ static inline int tcpc_server_conn_count(struct tcpc_server *s)
 	return s->_conn_count;
 }
 
-static inline void _tcpc_server_add_client(struct tcpc_server *s,
+static inline void _tcpc_server_add_conn(struct tcpc_server *s,
 		struct tcpc_server_conn *c)
 {
-	pthread_mutex_lock(&s->_clients_mutex);
+	pthread_mutex_lock(&s->_conn_ll_mutex);
 	/* insert at beginning */
 	c->_prev = NULL;
-	c->_next = s->_clients;
-	if(s->_clients)
-		s->_clients->_prev = c;
-	s->_clients = c;
-	pthread_mutex_unlock(&s->_clients_mutex);
+	c->_next = s->_conns_ll;
+	if(s->_conns_ll)
+		s->_conns_ll->_prev = c;
+	s->_conns_ll = c;
+	pthread_mutex_unlock(&s->_conn_ll_mutex);
 }
 
-static inline void _tcpc_server_remove_client(struct tcpc_server *s,
+static inline void _tcpc_server_remove_conn(struct tcpc_server *s,
 		struct tcpc_server_conn *c)
 {
-	pthread_mutex_lock(&s->_clients_mutex);
+	pthread_mutex_lock(&s->_conn_ll_mutex);
 	if(c->_prev==NULL) {
 		/* if I'm the beginning of the list, update the main list
 		 * pointer to my next pointer.
 		 */
-		s->_clients = c->_next;
+		s->_conns_ll = c->_next;
 	} else {
 		/* otherwise, update the previous node's next pointer to my
 		 * next pointer
@@ -190,7 +195,7 @@ static inline void _tcpc_server_remove_client(struct tcpc_server *s,
 	 */
 	if(c->_next)
 		c->_next->_prev = c->_prev;
-	pthread_mutex_unlock(&s->_clients_mutex);
+	pthread_mutex_unlock(&s->_conn_ll_mutex);
 }
 /****************************************************************************/
 
@@ -228,14 +233,14 @@ int tcpc_start_server(struct tcpc_server *s);
  */
 void tcpc_close_server(struct tcpc_server *s);
 
-/* tcpc_send_to_client
- * 	DESCRIPTION: sends a buffer to a client connection. This function is
+/* tcpc_server_send_to
+ * 	DESCRIPTION: sends a buffer to a server connection. This function is
  * 	basically a direct interface to SEND(2). Return values are directly
  * 	from send(), and flags are sent directly to send(). The MSG_NOSIGNAL
  * 	flag is always passed to send(). You must check for the EPIPE return
  * 	value if the other end breaks the connection.
  */
-static inline int tcpc_send_to_client(struct tcpc_server_conn *c,
+static inline int tcpc_server_send_to(struct tcpc_server_conn *c,
 		const void *buf, size_t len, int flags)
 {
 	return send(c->_sock, buf, len, flags | MSG_NOSIGNAL);

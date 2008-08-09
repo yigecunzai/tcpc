@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <pthread.h>
+#include <string.h>
 
 
 /* main tcpc server structure */
@@ -23,32 +24,36 @@ static struct sigaction act = {
 /*******************/
 
 /* callbacks */
-/* called when a client connection is closed */
+/* called when a server connection is closed */
 void conn_close(struct tcpc_server_conn *c)
 {
 	printf("Closing Connection: %08x\n",
-			ntohl(c->client_addr.sin_addr.s_addr));
+			ntohl(c->conn_addr.sin_addr.s_addr));
 	printf("Connection_Count: %d\n",
 			tcpc_server_conn_count(tcpc_conn_server(c)));
 }
 
-/* called when a client connection has new data */
+/* called when a server connection has new data */
 void new_data(struct tcpc_server_conn *c, size_t len)
 {
 	printf("New Data: %d\n",len);
-	if(tcpc_send_to_client(c, c->rxbuf, len, 0) < 0)
+	if(tcpc_server_send_to(c, c->rxbuf, len, 0) < 0)
 		perror("Could not send data");
 }
 
 /* called when a new client has connected */
 void new_conn(struct tcpc_server_conn *c)
 {
-	printf("New Connection: %08x\n",ntohl(c->client_addr.sin_addr.s_addr));
+	const char *greeting = "Hello from TCPC\r\n";
+
+	printf("New Connection: %08x\n",ntohl(c->conn_addr.sin_addr.s_addr));
 	/* a new client has connected, so fill in the callbacks */
 	c->conn_close_h = &conn_close;
 	c->new_data_h = &new_data;
 	printf("Connection_Count: %d\n",
 			tcpc_server_conn_count(tcpc_conn_server(c)));
+	if(tcpc_server_send_to(c, greeting, strlen(greeting), 0) < 0)
+		perror("Could not send data");
 }
 
 /* Main Routine */
@@ -95,7 +100,7 @@ int main(int argc,char *argv[])
 
 	printf("Stopping server\n");
 
-	/* closes all client connections and closes the socket */
+	/* closes all server connections and closes the socket */
 	tcpc_close_server(&test_server);
 
 	return 0;

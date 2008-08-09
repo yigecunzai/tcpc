@@ -29,7 +29,7 @@
 
 
 /* thread functions */
-static void *client_thread_routine(void *arg)
+static void *server_conn_thread_routine(void *arg)
 {
 	struct tcpc_server_conn *c = (struct tcpc_server_conn *)arg;
 
@@ -60,16 +60,16 @@ static void *client_thread_routine(void *arg)
 			}
 		}
 		if(c->_poll.revents & POLLRDHUP) {
-			/* client has closed */
+			/* connection has closed */
 			c->_active = 0;
 		}
 	}
 
-	/* clean up this client */
+	/* clean up this connection */
 	/* close the socket */
 	close(c->_sock);
-	/* remove from the linked list of clients */
-	_tcpc_server_remove_client(c->_parent, c);
+	/* remove from the linked list of connections */
+	_tcpc_server_remove_conn(c->_parent, c);
 	/* decrement the connection count in the parent */
 	pthread_mutex_lock(&c->_parent->_conn_count_mutex);
 	c->_parent->_conn_count--;
@@ -87,7 +87,7 @@ static void *listen_thread_routine(void *arg)
 {
 	struct tcpc_server *s = (struct tcpc_server *)arg;
 	struct tcpc_server_conn *nc;
-	socklen_t client_addr_len;
+	socklen_t conn_addr_len;
 	int e;
 
 	while(s->_active) {
@@ -113,10 +113,10 @@ static void *listen_thread_routine(void *arg)
 			}
 			memset(nc, 0, sizeof(struct tcpc_server_conn));
 			/* accept the connection */
-			client_addr_len = sizeof(nc->client_addr);
+			conn_addr_len = sizeof(nc->conn_addr);
 			nc->_sock = accept(s->_sock,
-				(struct sockaddr *)&nc->client_addr,
-				&client_addr_len);
+				(struct sockaddr *)&nc->conn_addr,
+				&conn_addr_len);
 			if(nc->_sock < 0) {
 				perror("listen_thread");
 				free(nc);
@@ -125,7 +125,7 @@ static void *listen_thread_routine(void *arg)
 			/* fill in the parent pointer */
 			nc->_parent = s;
 			/* add connection to list */
-			_tcpc_server_add_client(s, nc);
+			_tcpc_server_add_conn(s, nc);
 			pthread_mutex_lock(&s->_conn_count_mutex);
 			s->_conn_count++;
 			pthread_mutex_unlock(&s->_conn_count_mutex);
@@ -136,42 +136,42 @@ static void *listen_thread_routine(void *arg)
 			/* call callback */
 			if(s->new_conn_h)
 				(s->new_conn_h)(nc);
-			/* allocate client buffers */
+			/* allocate connection buffers */
 			nc->rxbuf = (uint8_t *)malloc(nc->rxbuf_sz);
 			if(!nc->rxbuf) {
 				perror("listen_thread");
 				if(nc->conn_close_h)
 					(nc->conn_close_h)(nc);
 				close(nc->_sock);
-				_tcpc_server_remove_client(nc->_parent, nc);
+				_tcpc_server_remove_conn(nc->_parent, nc);
 				free(nc);
 				continue;
 			}
-			/* start the client thread */
+			/* start the connection thread */
 			nc->_active = 1;
-			if(pthread_create(&nc->_client_thread, NULL, 
-					&client_thread_routine, nc) != 0) {
+			if(pthread_create(&nc->_server_conn_thread, NULL, 
+					&server_conn_thread_routine, nc) != 0) {
 				perror("listen_thread");
 				if(nc->conn_close_h)
 					(nc->conn_close_h)(nc);
 				close(nc->_sock);
-				_tcpc_server_remove_client(nc->_parent, nc);
+				_tcpc_server_remove_conn(nc->_parent, nc);
 				free(nc);
 				continue;
 			}
 		}
 	}
 
-	/* clean up clients */
-	pthread_mutex_lock(&s->_clients_mutex);
-	while(s->_clients) {
-		pthread_t ct = s->_clients->_client_thread;
-		s->_clients->_active = 0;
-		pthread_mutex_unlock(&s->_clients_mutex);
+	/* clean up connections */
+	pthread_mutex_lock(&s->_conn_ll_mutex);
+	while(s->_conns_ll) {
+		pthread_t ct = s->_conns_ll->_server_conn_thread;
+		s->_conns_ll->_active = 0;
+		pthread_mutex_unlock(&s->_conn_ll_mutex);
 		pthread_join(ct, NULL);
-		pthread_mutex_lock(&s->_clients_mutex);
+		pthread_mutex_lock(&s->_conn_ll_mutex);
 	}
-	pthread_mutex_unlock(&s->_clients_mutex);
+	pthread_mutex_unlock(&s->_conn_ll_mutex);
 
 	return NULL;
 }
@@ -225,8 +225,7 @@ int tcpc_start_server(struct tcpc_server *s)
 void tcpc_close_server(struct tcpc_server *s)
 {
 	/* tell the main listen thread to end and wait for it to join. it will
-	 * take care of closing all the client connections and joining those
-	 * threads
+	 * take care of closing all the connections and joining those threads
 	 */
 	s->_active=0;
 	pthread_join(s->_listen_thread, NULL);
