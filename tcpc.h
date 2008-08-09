@@ -228,4 +228,17 @@ int tcpc_start_server(struct tcpc_server *s);
  */
 void tcpc_close_server(struct tcpc_server *s);
 
+/* tcpc_send_to_client
+ * 	DESCRIPTION: sends a buffer to a client connection. This function is
+ * 	basically a direct interface to SEND(2). Return values are directly
+ * 	from send(), and flags are sent directly to send(). The MSG_NOSIGNAL
+ * 	flag is always passed to send(). You must check for the EPIPE return
+ * 	value if the other end breaks the connection.
+ */
+static inline int tcpc_send_to_client(struct tcpc_server_conn *c,
+		const void *buf, size_t len, int flags)
+{
+	return send(c->_sock, buf, len, flags | MSG_NOSIGNAL);
+}
+
 #endif /* I__TCPC_H__ */

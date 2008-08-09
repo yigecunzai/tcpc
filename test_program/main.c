@@ -34,6 +34,8 @@ void conn_close(struct tcpc_server_conn *c)
 void new_data(struct tcpc_server_conn *c, size_t len)
 {
 	printf("New Data: %d\n",len);
+	if(tcpc_send_to_client(c, c->rxbuf, len, 0) < 0)
+		perror("Could not send data");
 }
 
 void new_conn(struct tcpc_server_conn *c)
