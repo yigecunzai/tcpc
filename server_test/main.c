@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <pthread.h>
 #include <string.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 
 /* main tcpc server structure */
@@ -28,7 +30,7 @@ static struct sigaction act = {
 void conn_close(struct tcpc_server_conn *c)
 {
 	printf("Closing Connection: %08x\n",
-			ntohl(c->conn_addr.sin_addr.s_addr));
+		ntohl(((struct sockaddr_in *)c->conn_addr)->sin_addr.s_addr));
 	printf("Connection_Count: %d\n",
 			tcpc_server_conn_count(tcpc_conn_server(c)));
 }
@@ -46,7 +48,8 @@ void new_conn(struct tcpc_server_conn *c)
 {
 	const char *greeting = "Hello from TCPC\r\n";
 
-	printf("New Connection: %08x\n",ntohl(c->conn_addr.sin_addr.s_addr));
+	printf("New Connection: %08x\n",
+		ntohl(((struct sockaddr_in *)c->conn_addr)->sin_addr.s_addr));
 	/* a new client has connected, so fill in the callbacks */
 	c->conn_close_h = &conn_close;
 	c->new_data_h = &new_data;
@@ -78,15 +81,28 @@ int main(int argc,char *argv[])
 	printf("Starting server on port: %d\n",port);
 
 	/* initialize our server structure */
-	tcpc_init_server(&test_server, (in_port_t)port);
+	if((tcpc_init_server(&test_server, sizeof(struct sockaddr_in))) < 0) {
+		printf("Failed to start server\n");
+		return 1;
+	}
+
+	/* setup the server address structure for our protocol family */
+	((struct sockaddr_in *)test_server.serv_addr)->sin_family = AF_INET;
+	((struct sockaddr_in *)test_server.serv_addr)->sin_port = htons(port);
+	((struct sockaddr_in *)test_server.serv_addr)->sin_addr.s_addr = 
+			htonl(INADDR_ANY);
+
 	/* set the new connection callback */
 	test_server.new_conn_h = &new_conn;
+
 	/* open the server. this basically just opens the socket */
 	if(tcpc_open_server(&test_server) < 0)
 		return 1;
+
 	/* set some socket options. see SETSOCKOPT(2) */
 	setsockopt(tcpc_server_socket(&test_server), SOL_SOCKET, SO_REUSEADDR, 
 			&(one), sizeof(one));
+
 	/* start the server. after this point the server is live and the
 	 * listening thread has been started
 	 */

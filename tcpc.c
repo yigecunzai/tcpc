@@ -28,6 +28,110 @@
 #include <string.h>
 
 
+/* local helper functions */
+static inline void _tcpc_server_add_conn(struct tcpc_server *s,
+		struct tcpc_server_conn *c)
+{
+	pthread_mutex_lock(&s->_conn_ll_mutex);
+	/* insert at beginning */
+	c->_prev = NULL;
+	c->_next = s->_conns_ll;
+	if(s->_conns_ll)
+		s->_conns_ll->_prev = c;
+	s->_conns_ll = c;
+	pthread_mutex_unlock(&s->_conn_ll_mutex);
+}
+
+static inline void _tcpc_server_remove_conn(struct tcpc_server *s,
+		struct tcpc_server_conn *c)
+{
+	pthread_mutex_lock(&s->_conn_ll_mutex);
+	if(c->_prev==NULL) {
+		/* if I'm the beginning of the list, update the main list
+		 * pointer to my next pointer.
+		 */
+		s->_conns_ll = c->_next;
+	} else {
+		/* otherwise, update the previous node's next pointer to my
+		 * next pointer
+		 */
+		c->_prev->_next = c->_next;
+	}
+	/* if I have a next pointer, update its previous pointer to my
+	 * previous pointer. this will be another node unless I'm the first
+	 * element, and then it will be a NULL
+	 */
+	if(c->_next)
+		c->_next->_prev = c->_prev;
+	pthread_mutex_unlock(&s->_conn_ll_mutex);
+}
+
+static inline void _free_tcpc_server_conn(struct tcpc_server_conn *c)
+{
+	/* always free everything. free does nothing with NULLs */
+	free(c->rxbuf);
+	free(c->conn_addr);
+	free(c);
+}
+
+static inline struct tcpc_server_conn *_setup_server_conn(struct tcpc_server *s)
+{
+	struct tcpc_server_conn *nc;
+
+	/* get a connection structure */
+	nc = (struct tcpc_server_conn *)malloc(sizeof(struct tcpc_server_conn));
+	if(!nc) {
+		perror("_setup_server_conn");
+		return NULL;
+	}
+	/* clear the memory */
+	memset(nc, 0, sizeof(struct tcpc_server_conn));
+	/* allocate the sockaddr */
+	nc->_sockaddr_size = s->_sockaddr_size;
+	nc->conn_addr = (struct sockaddr *)malloc(nc->_sockaddr_size);
+	if(!nc->conn_addr) {
+		_free_tcpc_server_conn(nc);
+		perror("_setup_server_conn");
+		return NULL;
+	}
+	/* fill in the parent pointer */
+	nc->_parent = s;
+	/* set the default buffer size */
+	nc->rxbuf_sz = TCPC_DEFAULT_BUF_SZ;
+	/* accept the connection */
+	nc->_sock = accept(s->_sock, nc->conn_addr, &nc->_sockaddr_size);
+	if(nc->_sock < 0) {
+		perror("_setup_server_conn");
+		_free_tcpc_server_conn(nc);
+		return NULL;
+	}
+	/* add connection to list */
+	_tcpc_server_add_conn(s, nc);
+	pthread_mutex_lock(&s->_conn_count_mutex);
+	s->_conn_count++;
+	pthread_mutex_unlock(&s->_conn_count_mutex);
+	/* initialize the rx buffer mutex */
+	pthread_mutex_init(&nc->rxbuf_mutex, NULL);
+	/* call callback */
+	if(s->new_conn_h)
+		(s->new_conn_h)(nc);
+	/* allocate connection buffers - done after callback so callback can
+	 * change default size
+	 */
+	nc->rxbuf = (uint8_t *)malloc(nc->rxbuf_sz);
+	if(!nc->rxbuf) {
+		perror("_setup_server_conn");
+		if(nc->conn_close_h)
+			(nc->conn_close_h)(nc);
+		close(nc->_sock);
+		_tcpc_server_remove_conn(nc->_parent, nc);
+		_free_tcpc_server_conn(nc);
+		return NULL;
+	}
+
+	return nc;
+}
+
 /* thread functions */
 static void *server_conn_thread_routine(void *arg)
 {
@@ -78,7 +182,7 @@ static void *server_conn_thread_routine(void *arg)
 	if(c->conn_close_h)
 		(c->conn_close_h)(c);
 	/* free the memory */
-	free(c);
+	_free_tcpc_server_conn(c);
 
 	return NULL;
 }
@@ -87,7 +191,6 @@ static void *listen_thread_routine(void *arg)
 {
 	struct tcpc_server *s = (struct tcpc_server *)arg;
 	struct tcpc_server_conn *nc;
-	socklen_t conn_addr_len;
 	int e;
 
 	while(s->_active) {
@@ -104,49 +207,8 @@ static void *listen_thread_routine(void *arg)
 			/* client is trying to connect */
 			if(s->_conn_count >= s->max_connections)
 				continue;
-			/* get a connection structure */
-			nc = (struct tcpc_server_conn *)
-				malloc(sizeof(struct tcpc_server_conn));
-			if(!nc) {
-				perror("listen_thread");
+			if((nc = _setup_server_conn(s)) == NULL)
 				continue;
-			}
-			memset(nc, 0, sizeof(struct tcpc_server_conn));
-			/* accept the connection */
-			conn_addr_len = sizeof(nc->conn_addr);
-			nc->_sock = accept(s->_sock,
-				(struct sockaddr *)&nc->conn_addr,
-				&conn_addr_len);
-			if(nc->_sock < 0) {
-				perror("listen_thread");
-				free(nc);
-				continue;
-			}
-			/* fill in the parent pointer */
-			nc->_parent = s;
-			/* add connection to list */
-			_tcpc_server_add_conn(s, nc);
-			pthread_mutex_lock(&s->_conn_count_mutex);
-			s->_conn_count++;
-			pthread_mutex_unlock(&s->_conn_count_mutex);
-			/* set the default buffer size */
-			nc->rxbuf_sz = TCPC_DEFAULT_BUF_SZ;
-			/* initialize the rx buffer mutex */
-			pthread_mutex_init(&nc->rxbuf_mutex, NULL);
-			/* call callback */
-			if(s->new_conn_h)
-				(s->new_conn_h)(nc);
-			/* allocate connection buffers */
-			nc->rxbuf = (uint8_t *)malloc(nc->rxbuf_sz);
-			if(!nc->rxbuf) {
-				perror("listen_thread");
-				if(nc->conn_close_h)
-					(nc->conn_close_h)(nc);
-				close(nc->_sock);
-				_tcpc_server_remove_conn(nc->_parent, nc);
-				free(nc);
-				continue;
-			}
 			/* start the connection thread */
 			nc->_active = 1;
 			if(pthread_create(&nc->_server_conn_thread, NULL, 
@@ -156,7 +218,7 @@ static void *listen_thread_routine(void *arg)
 					(nc->conn_close_h)(nc);
 				close(nc->_sock);
 				_tcpc_server_remove_conn(nc->_parent, nc);
-				free(nc);
+				_free_tcpc_server_conn(nc);
 				continue;
 			}
 		}
@@ -178,9 +240,41 @@ static void *listen_thread_routine(void *arg)
 
 
 /* api functions */
+int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size)
+{
+	/* clear the structure */
+	memset(s, 0, sizeof(struct tcpc_server));
+
+	/* allocate the sockaddr */
+	if((s->serv_addr = (struct sockaddr *)malloc(sockaddr_size))==NULL) {
+		perror("tcpc_init_server");
+		return -1;
+	}
+	/* set the sockaddr size */
+	s->_sockaddr_size = sockaddr_size;
+
+	/* init the socket descriptor to an invalid state */
+	s->_sock = -1;
+
+	/* init the mutexes */
+	pthread_mutex_init(&s->_conn_ll_mutex, NULL);
+	pthread_mutex_init(&s->_conn_count_mutex, NULL);
+
+	/* set the default configurations */
+	s->max_connections = 100;
+	s->listen_backlog = 10;
+
+	/* setup the poll */
+	s->_poll.fd = -1;
+	s->_poll.events = POLLIN;
+	s->_poll.revents = 0;
+
+	return 0;
+}
+
 int tcpc_open_server(struct tcpc_server *s)
 {
-	int sock = socket(s->serv_addr.sin_family, SOCK_STREAM, 0);
+	int sock = socket(s->serv_addr->sa_family, SOCK_STREAM, 0);
 	if(sock < 0) {
 		perror("tcpc_open_server");
 		return -1;
@@ -199,8 +293,7 @@ int tcpc_start_server(struct tcpc_server *s)
 	}
 
 	/* bind the socket to serv_addr */
-	if(bind(s->_sock, (struct sockaddr *) &s->serv_addr,
-			sizeof(s->serv_addr)) < 0) {
+	if(bind(s->_sock, s->serv_addr, s->_sockaddr_size) < 0) {
 		perror("tcpc_start_server");
 		return -2;
 	}
@@ -232,4 +325,6 @@ void tcpc_close_server(struct tcpc_server *s)
 	close(s->_sock);
 	s->_sock = -1;
 	s->_poll.fd = -1;
+	free(s->serv_addr);
+	s->serv_addr = NULL;
 }

@@ -25,8 +25,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <pthread.h>
 #include <poll.h>
 
@@ -35,6 +33,7 @@
 
 #define TCPC_DEFAULT_BUF_SZ	1024
 
+/* SERVER FRAMEWORK */
 /****************************************************************************
  * struct tcpc_server_conn
  * 	DESCRIPTION: TCPC server connection data structure. Linked list data
@@ -46,7 +45,7 @@
  */
 struct tcpc_server_conn {
 	/* connection address information */
-	struct sockaddr_in conn_addr;
+	struct sockaddr *conn_addr;
 
 	/* data buffers */
 	size_t rxbuf_sz;
@@ -62,6 +61,7 @@ struct tcpc_server_conn {
 
 	/* private members - don't modify directly */
 	int _sock;
+	size_t _sockaddr_size;
 	volatile int _active;
 	pthread_t _server_conn_thread;
 	struct pollfd _poll;
@@ -87,7 +87,7 @@ static inline struct tcpc_server *tcpc_conn_server(struct tcpc_server_conn *c)
  */
 struct tcpc_server {
 	/* server address information */
-	struct sockaddr_in serv_addr;
+	struct sockaddr *serv_addr;
 
 	/* private pointer. to be used by application */
 	void *priv;
@@ -102,6 +102,8 @@ struct tcpc_server {
 	/* private members - don't modify directly */
 	int _sock; /* server socket */
 
+	size_t _sockaddr_size; /* size of sockaddr structure */
+
 	pthread_mutex_t _conn_ll_mutex; /* connection linked list mutex */
 	struct tcpc_server_conn *_conns_ll; /* connection linked list */
 
@@ -113,37 +115,6 @@ struct tcpc_server {
 
 	struct pollfd _poll;
 };
-
-/* tcpc_open_server
- * 	DESCRIPTION: intializes a tcpc_server structure to default values
- */
-static inline void tcpc_init_server(struct tcpc_server *s, in_port_t port)
-{
-	s->serv_addr.sin_family = AF_INET;
-	s->serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	s->serv_addr.sin_port = htons(port);
-
-	s->_sock = -1;
-
-	pthread_mutex_init(&s->_conn_ll_mutex, NULL);
-	s->_conns_ll = NULL;
-	pthread_mutex_init(&s->_conn_count_mutex, NULL);
-	s->_conn_count = 0;
-
-	s->_active = 0;
-	s->_listen_thread = 0;
-
-	s->priv = NULL;
-
-	s->max_connections = 100;
-	s->listen_backlog = 10;
-
-	s->new_conn_h = NULL;
-
-	s->_poll.fd = -1;
-	s->_poll.events = POLLIN;
-	s->_poll.revents = 0;
-}
 
 /* tcpc_server_socket
  * 	DESCRIPTION: returns the socket descriptor for a server
@@ -160,44 +131,18 @@ static inline int tcpc_server_conn_count(struct tcpc_server *s)
 {
 	return s->_conn_count;
 }
-
-static inline void _tcpc_server_add_conn(struct tcpc_server *s,
-		struct tcpc_server_conn *c)
-{
-	pthread_mutex_lock(&s->_conn_ll_mutex);
-	/* insert at beginning */
-	c->_prev = NULL;
-	c->_next = s->_conns_ll;
-	if(s->_conns_ll)
-		s->_conns_ll->_prev = c;
-	s->_conns_ll = c;
-	pthread_mutex_unlock(&s->_conn_ll_mutex);
-}
-
-static inline void _tcpc_server_remove_conn(struct tcpc_server *s,
-		struct tcpc_server_conn *c)
-{
-	pthread_mutex_lock(&s->_conn_ll_mutex);
-	if(c->_prev==NULL) {
-		/* if I'm the beginning of the list, update the main list
-		 * pointer to my next pointer.
-		 */
-		s->_conns_ll = c->_next;
-	} else {
-		/* otherwise, update the previous node's next pointer to my
-		 * next pointer
-		 */
-		c->_prev->_next = c->_next;
-	}
-	/* if I have a next pointer, update its previous pointer to my
-	 * previous pointer. this will be another node unless I'm the first
-	 * element, and then it will be a NULL
-	 */
-	if(c->_next)
-		c->_next->_prev = c->_prev;
-	pthread_mutex_unlock(&s->_conn_ll_mutex);
-}
 /****************************************************************************/
+
+/* tcpc_init_server
+ * 	DESCRIPTION: intializes a tcpc_server structure to default values and 
+ * 	allocates the sockaddr structure.
+ *
+ * 	RETURN VALUES:
+ * 		0	- everything went as planned
+ * 		errors: errno will be set with specific error information
+ * 		-1	- error creating socket
+ */
+int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size);
 
 /* tcpc_open_server
  * 	DESCRIPTION: Initializes a tcp server by opening the socket. Since
@@ -245,5 +190,64 @@ static inline int tcpc_server_send_to(struct tcpc_server_conn *c,
 {
 	return send(c->_sock, buf, len, flags | MSG_NOSIGNAL);
 }
+
+#if 0
+/* CLIENT FRAMEWORK */
+/****************************************************************************
+ * struct tcpc_client
+ * 	DESCRIPTION: Main data structure describing a client TCP connection
+ */
+struct tcpc_client {
+	/* server address information */
+	struct sockaddr_in serv_addr;
+
+	/* private pointer. to be used by application */
+	void *priv;
+
+	/* callbacks */
+	void (*new_data_h)(struct tcpc_client *);
+
+	/* configuration parameters */
+
+	/* private members - don't modify directly */
+	int _sock; /* client socket */
+
+	volatile int _active; /* client will stay connected until false */
+	pthread_t _client_thread;
+
+	struct pollfd _poll;
+};
+
+/* tcpc_init_client
+ * 	DESCRIPTION: intializes a tcpc_client structure to default values
+ */
+static inline void tcpc_init_client(struct tcpc_client *c, in_port_t port)
+{
+	c->serv_addr.sin_family = AF_INET;
+	c->serv_addr.sin_port = htons(port);
+
+	c->priv = NULL;
+
+	c->new_data_h = NULL;
+
+	c->_sock = -1;
+
+	c->_active = 0;
+	c->_client_thread = 0;
+
+	c->_poll.fd = -1;
+	c->_poll.events = POLLIN;
+	c->_poll.revents = 0;
+}
+
+/* tcpc_client_socket
+ * 	DESCRIPTION: returns the socket descriptor for a client
+ */
+static inline int tcpc_client_socket(struct tcpc_client *c)
+{
+	return c->_sock;
+}
+/****************************************************************************/
+#endif
 
 #endif /* I__TCPC_H__ */
