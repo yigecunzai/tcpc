@@ -81,7 +81,8 @@ int main(int argc,char *argv[])
 	printf("Starting server on port: %d\n",port);
 
 	/* initialize our server structure */
-	if((tcpc_init_server(&test_server, sizeof(struct sockaddr_in))) < 0) {
+	if((tcpc_init_server(&test_server, sizeof(struct sockaddr_in),
+			&new_conn)) < 0) {
 		printf("Failed to start server\n");
 		return 1;
 	}
@@ -91,9 +92,6 @@ int main(int argc,char *argv[])
 	((struct sockaddr_in *)test_server.serv_addr)->sin_port = htons(port);
 	((struct sockaddr_in *)test_server.serv_addr)->sin_addr.s_addr = 
 			htonl(INADDR_ANY);
-
-	/* set the new connection callback */
-	test_server.new_conn_h = &new_conn;
 
 	/* open the server. this basically just opens the socket */
 	if(tcpc_open_server(&test_server) < 0)

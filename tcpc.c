@@ -240,7 +240,8 @@ static void *listen_thread_routine(void *arg)
 
 
 /* api functions */
-int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size)
+int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
+		void (*new_conn_h)(struct tcpc_server_conn *))
 {
 	/* clear the structure */
 	memset(s, 0, sizeof(struct tcpc_server));
@@ -268,6 +269,9 @@ int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size)
 	s->_poll.fd = -1;
 	s->_poll.events = POLLIN;
 	s->_poll.revents = 0;
+
+	/* set the callback */
+	s->new_conn_h = new_conn_h;
 
 	return 0;
 }

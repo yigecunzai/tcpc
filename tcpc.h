@@ -77,6 +77,14 @@ static inline struct tcpc_server *tcpc_conn_server(struct tcpc_server_conn *c)
 {
 	return c->_parent;
 }
+
+/* tcpc_server_conn_socket
+ * 	DESCRIPTION: returns the socket descriptor for a server connection
+ */
+static inline int tcpc_server_conn_socket(struct tcpc_server_conn *c)
+{
+	return c->_sock;
+}
 /****************************************************************************/
 
 /****************************************************************************
@@ -142,7 +150,8 @@ static inline int tcpc_server_conn_count(struct tcpc_server *s)
  * 		errors: errno will be set with specific error information
  * 		-1	- error creating socket
  */
-int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size);
+int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
+		void (*new_conn_h)(struct tcpc_server_conn *));
 
 /* tcpc_open_server
  * 	DESCRIPTION: Initializes a tcp server by opening the socket. Since
