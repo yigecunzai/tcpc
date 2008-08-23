@@ -35,12 +35,23 @@ void conn_close(struct tcpc_server_conn *c)
 			tcpc_server_conn_count(tcpc_conn_server(c)));
 }
 
-/* called when a server connection has new data */
-void new_data(struct tcpc_server_conn *c, size_t len)
+/* server connection handler */
+PT_THREAD(conn_h(struct tcpc_server_conn *c, size_t len))
 {
-	printf("New Data: %d\n",len);
-	if(tcpc_server_send_to(c, c->rxbuf, len, 0) < 0)
-		perror("Could not send data");
+	if(len > 0) {
+		printf("New Data: %d\n",len);
+		if(tcpc_server_send_to(c, c->rxbuf, len, 0) < 0)
+			perror("Could not send data");
+	}
+
+	PT_BEGIN(c->conn_h_pt);
+
+	PT_WAIT_UNTIL(c->conn_h_pt, len > 0);
+
+	if(c->rxbuf[0] != 'Q')
+		PT_RESTART(c->conn_h_pt);
+
+	PT_END(c->conn_h_pt);
 }
 
 /* called when a new client has connected */
@@ -52,7 +63,7 @@ void new_conn(struct tcpc_server_conn *c)
 		ntohl(((struct sockaddr_in *)c->conn_addr)->sin_addr.s_addr));
 	/* a new client has connected, so fill in the callbacks */
 	c->conn_close_h = &conn_close;
-	c->new_data_h = &new_data;
+	c->conn_h = &conn_h;
 	printf("Connection_Count: %d\n",
 			tcpc_server_conn_count(tcpc_conn_server(c)));
 	if(tcpc_server_send_to(c, greeting, strlen(greeting), 0) < 0)

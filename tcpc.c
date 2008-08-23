@@ -136,12 +136,15 @@ static inline struct tcpc_server_conn *_setup_server_conn(struct tcpc_server *s)
 static void *server_conn_thread_routine(void *arg)
 {
 	struct tcpc_server_conn *c = (struct tcpc_server_conn *)arg;
+	ssize_t l;
 
 	c->_poll.fd = c->_sock;
 	c->_poll.events = POLLRDHUP | POLLIN;
 
 	while(c->_active) {
 		sched_yield();
+		l = 0; /* initialize length to 0 on each loop */
+		/* check for data in the socket */
 		c->_poll.revents = 0;
 		if(poll(&c->_poll, 1, 1) < 0) {
 			/* error */
@@ -151,16 +154,21 @@ static void *server_conn_thread_routine(void *arg)
 		/* handle the revents */
 		if(c->_poll.revents & POLLIN) {
 			/* data available */
-			ssize_t l;
-			pthread_mutex_lock(&c->rxbuf_mutex);
-			l=recv(c->_sock, c->rxbuf, c->rxbuf_sz, 0);
-			pthread_mutex_unlock(&c->rxbuf_mutex);
-			if(l < 0) {
-				/* error */
-				perror("listen_thread");
-				continue;
-			} else if(l > 0 && c->new_data_h) {
-				(c->new_data_h)(c, (size_t)l);
+			if(pthread_mutex_trylock(&c->rxbuf_mutex) == 0) {
+				l=recv(c->_sock, c->rxbuf, c->rxbuf_sz, 0);
+				pthread_mutex_unlock(&c->rxbuf_mutex);
+				if(l < 0) {
+					/* error */
+					perror("listen_thread");
+					continue;
+				}
+			}
+		}
+		/* call the connection protothread */
+		if(c->conn_h) {
+			if((c->conn_h)(c, (size_t)l) == PT_ENDED) {
+				/* connection thread has ended */
+				c->_active = 0;
 			}
 		}
 		if(c->_poll.revents & POLLRDHUP) {

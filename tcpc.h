@@ -27,6 +27,7 @@
 #include <sys/socket.h>
 #include <pthread.h>
 #include <poll.h>
+#include "pt.h"
 
 #ifndef I__TCPC_H__
 	#define I__TCPC_H__
@@ -57,7 +58,8 @@ struct tcpc_server_conn {
 
 	/* callbacks */
 	void (*conn_close_h)(struct tcpc_server_conn *);
-	void (*new_data_h)(struct tcpc_server_conn *, size_t len);
+	PT_THREAD((*conn_h)(struct tcpc_server_conn *, size_t len));
+	pt_t conn_h_pt;
 
 	/* private members - don't modify directly */
 	int _sock;
