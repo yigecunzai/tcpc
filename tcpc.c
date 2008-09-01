@@ -247,7 +247,8 @@ static void *listen_thread_routine(void *arg)
 }
 
 
-/* api functions */
+/* API FUNCTIONS */
+/* SERVER FRAMEWORK */
 int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
 		void (*new_conn_h)(struct tcpc_server_conn *))
 {
@@ -339,4 +340,49 @@ void tcpc_close_server(struct tcpc_server *s)
 	s->_poll.fd = -1;
 	free(s->serv_addr);
 	s->serv_addr = NULL;
+}
+
+/* CLIENT FRAMEWORK */
+void free_tcpc_client_members(struct tcpc_client *c)
+{
+	/* always free everything. free does nothing with NULLs */
+	free(c->rxbuf);
+	free(c->serv_addr);
+}
+
+
+int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
+		size_t rxbuf_sz)
+{
+	/* clear the structure */
+	memset(c, 0, sizeof(struct tcpc_client));
+
+	/* allocate the sockaddr */
+	if((c->serv_addr = (struct sockaddr *)malloc(sockaddr_size))==NULL) {
+		perror("tcpc_init_client");
+		return -1;
+	}
+	/* set the sockaddr size */
+	c->_sockaddr_size = sockaddr_size;
+
+	/* init the socket descriptor to an invalid state */
+	c->_sock = -1;
+
+	/* setup the poll */
+	c->_poll.fd = -1;
+	c->_poll.events = POLLIN;
+	c->_poll.revents = 0;
+
+	/* init the rxbuf mutex */
+	pthread_mutex_init(&c->rxbuf_mutex, NULL);
+
+	/* allocate the receive buffer */
+	if((c->rxbuf = (uint8_t *)malloc(rxbuf_sz)) == NULL) {
+		free_tcpc_client_members(c);
+		perror("tcpc_init_client");
+		return -1;
+	}
+	c->_rxbuf_sz = rxbuf_sz;
+
+	return 0;
 }

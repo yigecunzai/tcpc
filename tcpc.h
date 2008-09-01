@@ -57,7 +57,12 @@ struct tcpc_server_conn {
 	void *priv;
 
 	/* callbacks */
+	/* conn_close_h is called whenever a client connection is closed.
+	 */
 	void (*conn_close_h)(struct tcpc_server_conn *);
+	/* conn_h is called consistently. When len is non-zero, there are len
+	 * new bytes in rxbuf.
+	 */
 	PT_THREAD((*conn_h)(struct tcpc_server_conn *, size_t len));
 	pt_t conn_h_pt;
 
@@ -150,7 +155,7 @@ static inline int tcpc_server_conn_count(struct tcpc_server *s)
  * 	RETURN VALUES:
  * 		0	- everything went as planned
  * 		errors: errno will be set with specific error information
- * 		-1	- error creating socket
+ * 		-1	- error
  */
 int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
 		void (*new_conn_h)(struct tcpc_server_conn *));
@@ -158,7 +163,8 @@ int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
 /* tcpc_open_server
  * 	DESCRIPTION: Initializes a tcp server by opening the socket. Since
  * 	nothing other than creation is done, the socket options can be set
- * 	before tcpc_start_server is called.
+ * 	before tcpc_start_server is called. The serv_addr must be set before
+ * 	this call.
  *
  * 	RETURN VALUES:
  * 		0	- everything went as planned
@@ -202,7 +208,6 @@ static inline int tcpc_server_send_to(struct tcpc_server_conn *c,
 	return send(c->_sock, buf, len, flags | MSG_NOSIGNAL);
 }
 
-#if 0
 /* CLIENT FRAMEWORK */
 /****************************************************************************
  * struct tcpc_client
@@ -210,15 +215,24 @@ static inline int tcpc_server_send_to(struct tcpc_server_conn *c,
  */
 struct tcpc_client {
 	/* server address information */
-	struct sockaddr_in serv_addr;
+	struct sockaddr *serv_addr;
 
 	/* private pointer. to be used by application */
 	void *priv;
 
 	/* callbacks */
-	void (*new_data_h)(struct tcpc_client *);
+	/* conn_close_h is called whenever a server connection is closed.
+	 */
+	void (*conn_close_h)(struct tcpc_client *);
+	/* conn_h is called consistently. When len is non-zero, there are len
+	 * new bytes in rxbuf.
+	 */
+	PT_THREAD((*conn_h)(struct tcpc_client *, size_t len));
+	pt_t conn_h_pt;
 
-	/* configuration parameters */
+	/* data buffers */
+	uint8_t *rxbuf;
+	pthread_mutex_t rxbuf_mutex;
 
 	/* private members - don't modify directly */
 	int _sock; /* client socket */
@@ -227,29 +241,22 @@ struct tcpc_client {
 	pthread_t _client_thread;
 
 	struct pollfd _poll;
+
+	size_t _sockaddr_size;
+	size_t _rxbuf_sz;
 };
 
 /* tcpc_init_client
- * 	DESCRIPTION: intializes a tcpc_client structure to default values
+ * 	DESCRIPTION: intializes a tcpc_client structure to default values and 
+ * 	allocates the sockaddr structure.
+ *
+ * 	RETURN VALUES:
+ * 		0	- everything went as planned
+ * 		errors: errno will be set with specific error information
+ * 		-1	- error
  */
-static inline void tcpc_init_client(struct tcpc_client *c, in_port_t port)
-{
-	c->serv_addr.sin_family = AF_INET;
-	c->serv_addr.sin_port = htons(port);
-
-	c->priv = NULL;
-
-	c->new_data_h = NULL;
-
-	c->_sock = -1;
-
-	c->_active = 0;
-	c->_client_thread = 0;
-
-	c->_poll.fd = -1;
-	c->_poll.events = POLLIN;
-	c->_poll.revents = 0;
-}
+int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
+		size_t rxbuf_sz);
 
 /* tcpc_client_socket
  * 	DESCRIPTION: returns the socket descriptor for a client
@@ -258,7 +265,58 @@ static inline int tcpc_client_socket(struct tcpc_client *c)
 {
 	return c->_sock;
 }
+
+/* free_tcpc_client_members
+ * 	DESCRIPTION: free's up all the malloced members of the structure
+ */
+void free_tcpc_client_members(struct tcpc_client *c);
+
 /****************************************************************************/
-#endif
+
+/* tcpc_open_client
+ * 	DESCRIPTION: Initializes a tcp client by opening the socket. Since
+ * 	nothing other than creation is done, the socket options can be set
+ * 	before tcpc_start_client is called. The serv_addr must be set before
+ * 	this call.
+ *
+ * 	RETURN VALUES:
+ * 		0	- everything went as planned
+ * 		errors: errno will be set with specific error information
+ * 		-1	- error creating socket
+ */
+int tcpc_open_client(struct tcpc_client *c);
+
+/* tcpc_start_client
+ * 	DESCRIPTION: starts a tcp client and connects to the server. If the
+ * 	connection succeeds, the clients listen thread is started. The listen
+ * 	thread calls the callbacks as necessary.
+ *
+ * 	RETURN VALUES:
+ * 		0	- everything went as planned
+ * 		-1	- no socket (no errno. you messed up)
+ * 		errors: errno will be set with specific error information
+ * 		-2	- error connecting socket
+ * 		-3	- error creating client thread
+ */
+int tcpc_start_client(struct tcpc_client *c);
+
+/* tcpc_close_client
+ * 	DESCRIPTION: stops and closes tcp client. this will end the thread
+ * 	associated with the client as well.
+ */
+void tcpc_close_client(struct tcpc_client *c);
+
+/* tcpc_client_send_to
+ * 	DESCRIPTION: sends a buffer to a connected server. This function is
+ * 	basically a direct interface to SEND(2). Return values are directly
+ * 	from send(), and flags are sent directly to send(). The MSG_NOSIGNAL
+ * 	flag is always passed to send(). You must check for the EPIPE return
+ * 	value if the other end breaks the connection.
+ */
+static inline int tcpc_client_send_to(struct tcpc_client *c,
+		const void *buf, size_t len, int flags)
+{
+	return send(c->_sock, buf, len, flags | MSG_NOSIGNAL);
+}
 
 #endif /* I__TCPC_H__ */
