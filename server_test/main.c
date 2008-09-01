@@ -127,6 +127,7 @@ int main(int argc,char *argv[])
 
 	/* closes all server connections and closes the socket */
 	tcpc_close_server(&test_server);
+	free_tcpc_server_members(&test_server);
 
 	return 0;
 }

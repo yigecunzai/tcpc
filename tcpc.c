@@ -24,7 +24,6 @@
 #include "tcpc.h"
 #include <stdio.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <string.h>
 
 
@@ -148,7 +147,7 @@ static void *server_conn_thread_routine(void *arg)
 		c->_poll.revents = 0;
 		if(poll(&c->_poll, 1, 1) < 0) {
 			/* error */
-			perror("listen_thread");
+			perror("server_conn_thread");
 			continue;
 		}
 		/* handle the revents */
@@ -159,7 +158,7 @@ static void *server_conn_thread_routine(void *arg)
 				pthread_mutex_unlock(&c->rxbuf_mutex);
 				if(l < 0) {
 					/* error */
-					perror("listen_thread");
+					perror("server_conn_thread");
 					continue;
 				}
 			}
@@ -186,7 +185,7 @@ static void *server_conn_thread_routine(void *arg)
 	pthread_mutex_lock(&c->_parent->_conn_count_mutex);
 	c->_parent->_conn_count--;
 	pthread_mutex_unlock(&c->_parent->_conn_count_mutex);
-	/* call the callback */
+	/* call the close callback */
 	if(c->conn_close_h)
 		(c->conn_close_h)(c);
 	/* free the memory */
@@ -242,6 +241,61 @@ static void *listen_thread_routine(void *arg)
 		pthread_mutex_lock(&s->_conn_ll_mutex);
 	}
 	pthread_mutex_unlock(&s->_conn_ll_mutex);
+
+	return NULL;
+}
+
+static void *client_thread_routine(void *arg)
+{
+	struct tcpc_client *c = (struct tcpc_client *)arg;
+	ssize_t l;
+
+	c->_poll.events = POLLRDHUP | POLLIN;
+
+	while(c->_active) {
+		sched_yield();
+		l = 0; /* initialize length to 0 on each loop */
+		/* check for data in the socket */
+		c->_poll.revents = 0;
+		if(poll(&c->_poll, 1, 1) < 0) {
+			/* error */
+			perror("client_thread");
+			continue;
+		}
+		/* handle the revents */
+		if(c->_poll.revents & POLLIN) {
+			/* data available */
+			if(pthread_mutex_trylock(&c->rxbuf_mutex) == 0) {
+				l=recv(c->_sock, c->rxbuf, c->_rxbuf_sz, 0);
+				pthread_mutex_unlock(&c->rxbuf_mutex);
+				if(l < 0) {
+					/* error */
+					perror("client_thread");
+					continue;
+				}
+			}
+		}
+		/* call the connection protothread */
+		if(c->conn_h) {
+			if((c->conn_h)(c, (size_t)l) == PT_ENDED) {
+				/* connection thread has ended */
+				c->_active = 0;
+			}
+		}
+		if(c->_poll.revents & POLLRDHUP) {
+			/* connection has closed */
+			c->_active = 0;
+		}
+	}
+
+	/* clean up this connection */
+	/* close the socket */
+	close(c->_sock);
+	c->_sock = -1;
+	c->_poll.fd = -1;
+	/* call the close callback */
+	if(c->conn_close_h)
+		(c->conn_close_h)(c);
 
 	return NULL;
 }
@@ -338,21 +392,13 @@ void tcpc_close_server(struct tcpc_server *s)
 	close(s->_sock);
 	s->_sock = -1;
 	s->_poll.fd = -1;
-	free(s->serv_addr);
-	s->serv_addr = NULL;
 }
 
 /* CLIENT FRAMEWORK */
-void free_tcpc_client_members(struct tcpc_client *c)
-{
-	/* always free everything. free does nothing with NULLs */
-	free(c->rxbuf);
-	free(c->serv_addr);
-}
-
-
 int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
-		size_t rxbuf_sz)
+		size_t rxbuf_sz,
+		PT_THREAD((*conn_h)(struct tcpc_client *, size_t len)),
+		void (*conn_close_h)(struct tcpc_client *))
 {
 	/* clear the structure */
 	memset(c, 0, sizeof(struct tcpc_client));
@@ -384,5 +430,68 @@ int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
 	}
 	c->_rxbuf_sz = rxbuf_sz;
 
+	/* set the callbacks */
+	c->conn_h = conn_h;
+	c->conn_close_h = conn_close_h;
+
 	return 0;
+}
+
+int tcpc_open_client(struct tcpc_client *c)
+{
+	int sock = socket(c->serv_addr->sa_family, SOCK_STREAM, 0);
+	if(sock < 0) {
+		perror("tcpc_open_client");
+		return -1;
+	}
+	c->_sock = sock;
+	c->_poll.fd = sock;
+
+	return 0;
+}
+
+/* tcpc_start_client
+ * 	DESCRIPTION: starts a tcp client and connects to the server. If the
+ * 	connection succeeds, the clients listen thread is started. The listen
+ * 	thread calls the callbacks as necessary.
+ *
+ * 	RETURN VALUES:
+ * 		0	- everything went as planned
+ * 		-1	- no socket (no errno. you messed up)
+ * 		errors: errno will be set with specific error information
+ * 		-2	- error connecting socket
+ * 		-3	- error creating client thread
+ */
+int tcpc_start_client(struct tcpc_client *c)
+{
+	/* check for valid socket descriptor */
+	if(c->_sock < 0) {
+		return -1;
+	}
+
+	/* bind the socket to serv_addr */
+	if(connect(c->_sock, c->serv_addr, c->_sockaddr_size) < 0) {
+		perror("tcpc_start_client");
+		return -2;
+	}
+
+	/* start the client thread */
+	c->_active = 1;
+	if(pthread_create(&c->_client_thread, NULL, &client_thread_routine, c)
+			!= 0) {
+		perror("tcpc_start_client");
+		return -3;
+	}
+
+	return 0;
+}
+
+/* tcpc_close_client
+ * 	DESCRIPTION: stops and closes tcp client. this will end the thread
+ * 	associated with the client as well.
+ */
+void tcpc_close_client(struct tcpc_client *c)
+{
+	c->_active=0;
+	pthread_join(c->_client_thread, NULL);
 }

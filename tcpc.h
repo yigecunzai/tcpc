@@ -27,6 +27,7 @@
 #include <sys/socket.h>
 #include <pthread.h>
 #include <poll.h>
+#include <stdlib.h>
 #include "pt.h"
 
 #ifndef I__TCPC_H__
@@ -146,6 +147,16 @@ static inline int tcpc_server_conn_count(struct tcpc_server *s)
 {
 	return s->_conn_count;
 }
+
+/* free_tcpc_server_members
+ * 	DESCRIPTION: free's up all the malloced members of the structure
+ */
+static inline void free_tcpc_server_members(struct tcpc_server *s)
+{
+	/* always free everything. free does nothing with NULLs */
+	free(s->serv_addr);
+	s->serv_addr = NULL;
+}
 /****************************************************************************/
 
 /* tcpc_init_server
@@ -256,7 +267,9 @@ struct tcpc_client {
  * 		-1	- error
  */
 int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
-		size_t rxbuf_sz);
+		size_t rxbuf_sz,
+		PT_THREAD((*conn_h)(struct tcpc_client *, size_t len)),
+		void (*conn_close_h)(struct tcpc_client *));
 
 /* tcpc_client_socket
  * 	DESCRIPTION: returns the socket descriptor for a client
@@ -269,8 +282,14 @@ static inline int tcpc_client_socket(struct tcpc_client *c)
 /* free_tcpc_client_members
  * 	DESCRIPTION: free's up all the malloced members of the structure
  */
-void free_tcpc_client_members(struct tcpc_client *c);
-
+static inline void free_tcpc_client_members(struct tcpc_client *c)
+{
+	/* always free everything. free does nothing with NULLs */
+	free(c->rxbuf);
+	free(c->serv_addr);
+	c->rxbuf = NULL;
+	c->serv_addr = NULL;
+}
 /****************************************************************************/
 
 /* tcpc_open_client
