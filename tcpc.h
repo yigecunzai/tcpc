@@ -60,6 +60,7 @@ struct tcpc_server_conn {
 
 	/* configuration parameters */
 	int poll_timeout_ms;
+	ssize_t (*rx_h)(int sock, void *buf, size_t len);
 
 	/* callbacks */
 	/* conn_close_h is called whenever a client connection is closed.
@@ -237,6 +238,7 @@ struct tcpc_client {
 
 	/* configuration parameters */
 	int poll_timeout_ms;
+	ssize_t (*rx_h)(int sock, void *buf, size_t len);
 
 	/* callbacks */
 	/* conn_close_h is called whenever a server connection is closed.

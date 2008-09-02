@@ -28,6 +28,11 @@
 
 
 /* local helper functions */
+static ssize_t _tcpc_rx_handler(int sock, void *buf, size_t len)
+{
+	return recv(sock, buf, len, 0);
+}
+
 static inline void _tcpc_server_add_conn(struct tcpc_server *s,
 		struct tcpc_server_conn *c)
 {
@@ -99,6 +104,8 @@ static inline struct tcpc_server_conn *_setup_server_conn(struct tcpc_server *s)
 	nc->rxbuf_sz = TCPC_DEFAULT_BUF_SZ;
 	/* set the default poll timeout */
 	nc->poll_timeout_ms = TCPC_DEFAULT_POLL_TO;
+	/* set the default rx handler */
+	nc->rx_h = &_tcpc_rx_handler;
 	/* accept the connection */
 	nc->_sock = accept(s->_sock, nc->conn_addr, &nc->_sockaddr_size);
 	if(nc->_sock < 0) {
@@ -152,10 +159,15 @@ static void *server_conn_thread_routine(void *arg)
 			continue;
 		}
 		/* handle the revents */
+		if(c->_poll.revents & POLLRDHUP) {
+			/* connection has closed */
+			c->_active = 0;
+			continue;
+		}
 		if(c->_poll.revents & POLLIN) {
 			/* data available */
 			if(pthread_mutex_trylock(&c->rxbuf_mutex) == 0) {
-				l=recv(c->_sock, c->rxbuf, c->rxbuf_sz, 0);
+				l=(c->rx_h)(c->_sock, c->rxbuf, c->rxbuf_sz);
 				pthread_mutex_unlock(&c->rxbuf_mutex);
 				if(l == 0) {
 					/* connection closed */
@@ -167,11 +179,6 @@ static void *server_conn_thread_routine(void *arg)
 					continue;
 				}
 			}
-		}
-		if(c->_poll.revents & POLLRDHUP) {
-			/* connection has closed */
-			c->_active = 0;
-			continue;
 		}
 		/* call the connection protothread */
 		if(c->conn_h) {
@@ -267,12 +274,21 @@ static void *client_thread_routine(void *arg)
 			continue;
 		}
 		/* handle the revents */
+		if(c->_poll.revents & POLLRDHUP) {
+			/* connection has closed */
+			c->_active = 0;
+			continue;
+		}
 		if(c->_poll.revents & POLLIN) {
 			/* data available */
 			if(pthread_mutex_trylock(&c->rxbuf_mutex) == 0) {
-				l=recv(c->_sock, c->rxbuf, c->_rxbuf_sz, 0);
+				l=(c->rx_h)(c->_sock, c->rxbuf, c->_rxbuf_sz);
 				pthread_mutex_unlock(&c->rxbuf_mutex);
-				if(l < 0) {
+				if(l == 0) {
+					/* connection closed */
+					c->_active = 0;
+					continue;
+				} else if(l < 0) {
 					/* error */
 					perror("client_thread");
 					continue;
@@ -285,10 +301,6 @@ static void *client_thread_routine(void *arg)
 				/* connection thread has ended */
 				c->_active = 0;
 			}
-		}
-		if(c->_poll.revents & POLLRDHUP) {
-			/* connection has closed */
-			c->_active = 0;
 		}
 	}
 
@@ -436,6 +448,9 @@ int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
 		return -1;
 	}
 	c->_rxbuf_sz = rxbuf_sz;
+
+	/* set the default rx handler */
+	c->rx_h = &_tcpc_rx_handler;
 
 	/* set the callbacks */
 	c->conn_h = conn_h;
