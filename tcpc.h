@@ -34,6 +34,7 @@
 	#define I__TCPC_H__
 
 #define TCPC_DEFAULT_BUF_SZ	1024
+#define TCPC_DEFAULT_POLL_TO	10
 
 /* SERVER FRAMEWORK */
 /****************************************************************************
@@ -56,6 +57,9 @@ struct tcpc_server_conn {
 
 	/* private pointer. to be used by application */
 	void *priv;
+
+	/* configuration parameters */
+	int poll_timeout_ms;
 
 	/* callbacks */
 	/* conn_close_h is called whenever a client connection is closed.
@@ -230,6 +234,9 @@ struct tcpc_client {
 
 	/* private pointer. to be used by application */
 	void *priv;
+
+	/* configuration parameters */
+	int poll_timeout_ms;
 
 	/* callbacks */
 	/* conn_close_h is called whenever a server connection is closed.

@@ -97,6 +97,8 @@ static inline struct tcpc_server_conn *_setup_server_conn(struct tcpc_server *s)
 	nc->_parent = s;
 	/* set the default buffer size */
 	nc->rxbuf_sz = TCPC_DEFAULT_BUF_SZ;
+	/* set the default poll timeout */
+	nc->poll_timeout_ms = TCPC_DEFAULT_POLL_TO;
 	/* accept the connection */
 	nc->_sock = accept(s->_sock, nc->conn_addr, &nc->_sockaddr_size);
 	if(nc->_sock < 0) {
@@ -141,11 +143,10 @@ static void *server_conn_thread_routine(void *arg)
 	c->_poll.events = POLLRDHUP | POLLIN;
 
 	while(c->_active) {
-		sched_yield();
 		l = 0; /* initialize length to 0 on each loop */
 		/* check for data in the socket */
 		c->_poll.revents = 0;
-		if(poll(&c->_poll, 1, 1) < 0) {
+		if(poll(&c->_poll, 1, c->poll_timeout_ms) < 0) {
 			/* error */
 			perror("server_conn_thread");
 			continue;
@@ -156,12 +157,21 @@ static void *server_conn_thread_routine(void *arg)
 			if(pthread_mutex_trylock(&c->rxbuf_mutex) == 0) {
 				l=recv(c->_sock, c->rxbuf, c->rxbuf_sz, 0);
 				pthread_mutex_unlock(&c->rxbuf_mutex);
-				if(l < 0) {
+				if(l == 0) {
+					/* connection closed */
+					c->_active = 0;
+					continue;
+				} else if(l < 0) {
 					/* error */
 					perror("server_conn_thread");
 					continue;
 				}
 			}
+		}
+		if(c->_poll.revents & POLLRDHUP) {
+			/* connection has closed */
+			c->_active = 0;
+			continue;
 		}
 		/* call the connection protothread */
 		if(c->conn_h) {
@@ -169,10 +179,6 @@ static void *server_conn_thread_routine(void *arg)
 				/* connection thread has ended */
 				c->_active = 0;
 			}
-		}
-		if(c->_poll.revents & POLLRDHUP) {
-			/* connection has closed */
-			c->_active = 0;
 		}
 	}
 
@@ -201,8 +207,7 @@ static void *listen_thread_routine(void *arg)
 	int e;
 
 	while(s->_active) {
-		sched_yield();
-		e = poll(&s->_poll, 1, 1);
+		e = poll(&s->_poll, 1, 100);
 		if(e == 0) {
 			/* nothing to do */
 			continue;
@@ -253,11 +258,10 @@ static void *client_thread_routine(void *arg)
 	c->_poll.events = POLLRDHUP | POLLIN;
 
 	while(c->_active) {
-		sched_yield();
 		l = 0; /* initialize length to 0 on each loop */
 		/* check for data in the socket */
 		c->_poll.revents = 0;
-		if(poll(&c->_poll, 1, 1) < 0) {
+		if(poll(&c->_poll, 1, c->poll_timeout_ms) < 0) {
 			/* error */
 			perror("client_thread");
 			continue;
@@ -418,6 +422,9 @@ int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
 	c->_poll.fd = -1;
 	c->_poll.events = POLLIN;
 	c->_poll.revents = 0;
+
+	/* set the default poll timeout */
+	c->poll_timeout_ms = TCPC_DEFAULT_POLL_TO;
 
 	/* init the rxbuf mutex */
 	pthread_mutex_init(&c->rxbuf_mutex, NULL);
