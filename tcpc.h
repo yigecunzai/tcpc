@@ -61,6 +61,7 @@ struct tcpc_server_conn {
 	/* configuration parameters */
 	int poll_timeout_ms;
 	ssize_t (*rx_h)(int sock, void *buf, size_t len);
+	ssize_t (*tx_h)(int sock, const void *buf, size_t len, int flags);
 
 	/* callbacks */
 	/* conn_close_h is called whenever a client connection is closed.
@@ -218,10 +219,10 @@ void tcpc_close_server(struct tcpc_server *s);
  * 	flag is always passed to send(). You must check for the EPIPE return
  * 	value if the other end breaks the connection.
  */
-static inline int tcpc_server_send_to(struct tcpc_server_conn *c,
+static inline ssize_t tcpc_server_send_to(struct tcpc_server_conn *c,
 		const void *buf, size_t len, int flags)
 {
-	return send(c->_sock, buf, len, flags | MSG_NOSIGNAL);
+	return (c->tx_h)(c->_sock, buf, len, flags);
 }
 
 /* CLIENT FRAMEWORK */
@@ -239,6 +240,7 @@ struct tcpc_client {
 	/* configuration parameters */
 	int poll_timeout_ms;
 	ssize_t (*rx_h)(int sock, void *buf, size_t len);
+	ssize_t (*tx_h)(int sock, const void *buf, size_t len, int flags);
 
 	/* callbacks */
 	/* conn_close_h is called whenever a server connection is closed.
@@ -341,10 +343,10 @@ void tcpc_close_client(struct tcpc_client *c);
  * 	flag is always passed to send(). You must check for the EPIPE return
  * 	value if the other end breaks the connection.
  */
-static inline int tcpc_client_send_to(struct tcpc_client *c,
+static inline ssize_t tcpc_client_send_to(struct tcpc_client *c,
 		const void *buf, size_t len, int flags)
 {
-	return send(c->_sock, buf, len, flags | MSG_NOSIGNAL);
+	return (c->tx_h)(c->_sock, buf, len, flags);
 }
 
 #endif /* I__TCPC_H__ */

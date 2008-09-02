@@ -33,6 +33,12 @@ static ssize_t _tcpc_rx_handler(int sock, void *buf, size_t len)
 	return recv(sock, buf, len, 0);
 }
 
+static ssize_t _tcpc_tx_handler(int sock, const void *buf, size_t len, 
+		int flags)
+{
+	return send(sock, buf, len, flags | MSG_NOSIGNAL);
+}
+
 static inline void _tcpc_server_add_conn(struct tcpc_server *s,
 		struct tcpc_server_conn *c)
 {
@@ -106,6 +112,8 @@ static inline struct tcpc_server_conn *_setup_server_conn(struct tcpc_server *s)
 	nc->poll_timeout_ms = TCPC_DEFAULT_POLL_TO;
 	/* set the default rx handler */
 	nc->rx_h = &_tcpc_rx_handler;
+	/* set the default tx handler */
+	nc->tx_h = &_tcpc_tx_handler;
 	/* accept the connection */
 	nc->_sock = accept(s->_sock, nc->conn_addr, &nc->_sockaddr_size);
 	if(nc->_sock < 0) {
@@ -451,6 +459,8 @@ int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
 
 	/* set the default rx handler */
 	c->rx_h = &_tcpc_rx_handler;
+	/* set the default tx handler */
+	c->tx_h = &_tcpc_tx_handler;
 
 	/* set the callbacks */
 	c->conn_h = conn_h;
