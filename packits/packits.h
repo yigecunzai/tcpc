@@ -36,7 +36,7 @@
 /* Max Key Size */
 #define PACKITS_MAX_KEY		64
 
-/* Required Length Header Field */
+/* Header Length Field */
 #define CLENGTH_KEY		"Content-Length"
 
 
@@ -46,7 +46,7 @@ struct packit_record {
 	struct packit_record *prev;
 	char key[PACKITS_MAX_KEY + 1];
 	char *val;
-}
+};
 
 #define PACKITS_HASH_SIZE	32
 
@@ -55,7 +55,7 @@ struct packit {
 	struct packit_record *headers[PACKITS_HASH_SIZE];
 	unsigned int clen;
 	char *data;
-}
+};
 
 
 /* Packits API */
