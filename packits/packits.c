@@ -29,10 +29,10 @@
 /* local helper functions */
 static inline unsigned int hash(const char *str)
 {
-	unsigned int i, h = 0;
+	unsigned int h = 0;
 
-	for(i=0; i<strlen(str); i++) {
-		h += str[i] * 7;
+	while(*str) {
+		h += *str++ * 31;
 	}
 
 	return h % PACKITS_HASH_SIZE;
@@ -46,33 +46,50 @@ struct packit_record *packit_add_header(struct packit *p, const char *key,
 	struct packit_record *nr;
 	unsigned int h;
 	
-	/* check key lenght */
+	/* check key length */
 	if(strlen(key) > PACKITS_MAX_KEY) {
 		return NULL;
 	}
-	/* allocate record */
-	nr = (struct packit_record *)malloc(sizeof(struct packit_record));
-	if(nr == NULL) {
-		return NULL;
+
+	/* hash entry */
+	h = hash(key);
+
+	/* check for existing key */
+	nr = p->headers[h];
+	while(nr) {
+		if(strcmp(key, nr->key) == 0)
+			break;
+		nr = nr->next;
 	}
-	memset(nr, 0, sizeof(struct packit_record));
+
+	if(nr) { /* key already existed */
+		free(nr->val);
+		nr->val = NULL;
+	} else {
+		/* allocate record */
+		nr = (struct packit_record *)
+				malloc(sizeof(struct packit_record));
+		if(nr == NULL) {
+			return NULL;
+		}
+		memset(nr, 0, sizeof(struct packit_record));
+		/* copy key */
+		strcpy((char *)&nr->key, key);
+
+		/* insert at beginning */
+		nr->next = p->headers[h];
+		p->headers[h] = nr;
+		nr->next_full = p->headers_full;
+		p->headers_full = nr;
+	}
+
 	/* allocate val */
 	if((nr->val = (char *)malloc(strlen(val) + 1)) == NULL) {
 		free(nr);
 		return NULL;
 	}
-	/* copy key and val */
-	strcpy((char *)&nr->key, key);
+	/* copy val */
 	strcpy(nr->val, val);
-
-	/* hash entry */
-	h = hash(key);
-
-	/* insert at beginning */
-	nr->next = p->headers[h];
-	if(p->headers[h])
-		p->headers[h]->prev = nr;
-	p->headers[h] = nr;
 
 	return nr;
 }

@@ -35,6 +35,8 @@
 #define PACKITS_HEADER_END	"\n"
 /* Max Key Size */
 #define PACKITS_MAX_KEY		64
+/* Max Value Size */
+#define PACKITS_MAX_HVAL	1024
 
 /* Header Length Field */
 #define CLENGTH_KEY		"Content-Length"
@@ -42,8 +44,8 @@
 
 /* Packits Header Record */
 struct packit_record {
-	struct packit_record *next;
-	struct packit_record *prev;
+	struct packit_record *next;      /* hash table linked list of records */
+	struct packit_record *next_full; /* full linked list of records */
 	char key[PACKITS_MAX_KEY + 1];
 	char *val;
 };
@@ -53,6 +55,7 @@ struct packit_record {
 /* Packit Structure */
 struct packit {
 	struct packit_record *headers[PACKITS_HASH_SIZE];
+	struct packit_record *headers_full;
 	unsigned int clen;
 	char *data;
 };
@@ -74,5 +77,11 @@ struct packit_record *packit_add_header(struct packit *p, const char *key,
  *         NULL on failure
  */
 struct packit_record *packit_get_header(struct packit *p, const char *key);
+
+/* forall_packit_headers
+ */
+#define forall_packit_headers(packitp, recordp) \
+	for((recordp) = (packitp)->headers_full; (recordp); \
+			(recordp) = (recordp)->next_full)
 
 #endif /* I__PACKITS_H__ */

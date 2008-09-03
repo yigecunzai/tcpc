@@ -6,7 +6,6 @@
 int main(int argc, char *argv[])
 {
 	struct packit tp;
-	unsigned int i = 0;
 	struct packit_record *r;
 
 	memset(&tp, 0, sizeof(tp));
@@ -16,15 +15,13 @@ int main(int argc, char *argv[])
 	packit_add_header(&tp, "Test", "Program");
 
 	/* print all records */
-	while(i < PACKITS_HASH_SIZE) {
-		r = tp.headers[i];
-		while(r) {
-			printf("%3u : %s => %s\n", i, r->key, r->val);
-			r = r->next;
-		}
-		i++;
+	forall_packit_headers(&tp, r) {
+		printf("%s => %s\n", r->key, r->val);
 	}
 	printf("\n");
+
+	/* test modifying record */
+	packit_add_header(&tp, CLENGTH_KEY, "10");
 
 	/* test getting records */
 	r = packit_get_header(&tp, "Hello");
