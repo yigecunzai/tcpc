@@ -10,9 +10,11 @@ int main(int argc, char *argv[])
 
 	memset(&tp, 0, sizeof(tp));
 
-	packit_add_header(&tp, CLENGTH_KEY, "0");
+	packit_add_uint_header(&tp, CLENGTH_KEY, 0);
 	packit_add_header(&tp, "Hello", "World");
 	packit_add_header(&tp, "Test", "Program");
+	packit_add_uint_header(&tp, "UINT", 101);
+	packit_add_int_header(&tp, "INT", -12);
 
 	/* print all records */
 	forall_packit_headers(&tp, r) {
@@ -21,7 +23,7 @@ int main(int argc, char *argv[])
 	printf("\n");
 
 	/* test modifying record */
-	packit_add_header(&tp, CLENGTH_KEY, "10");
+	packit_add_uint_header(&tp, CLENGTH_KEY, 10);
 
 	/* test getting records */
 	r = packit_get_header(&tp, "Hello");

@@ -71,6 +71,22 @@ struct packit {
 struct packit_record *packit_add_header(struct packit *p, const char *key,
 		const char *val);
 
+/* packit_add_uint_header
+ *     RETURNS:
+ *         pointer to new packit_record on success
+ *         NULL on failure
+ */
+struct packit_record *packit_add_uint_header(struct packit *p, const char *key,
+		unsigned int val);
+
+/* packit_add_int_header
+ *     RETURNS:
+ *         pointer to new packit_record on success
+ *         NULL on failure
+ */
+struct packit_record *packit_add_int_header(struct packit *p, const char *key,
+		int val);
+
 /* packit_get_key
  *     RETURNS:
  *         pointer to packit_record on success

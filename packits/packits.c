@@ -24,6 +24,7 @@
 #include "packits.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 
 /* local helper functions */
@@ -92,6 +93,22 @@ struct packit_record *packit_add_header(struct packit *p, const char *key,
 	strcpy(nr->val, val);
 
 	return nr;
+}
+
+struct packit_record *packit_add_uint_header(struct packit *p, const char *key,
+		unsigned int val)
+{
+	char ns[21];
+	snprintf((char *)&ns, sizeof(ns), "%u", val);
+	return packit_add_header(p, key, (const char *)&ns);
+}
+
+struct packit_record *packit_add_int_header(struct packit *p, const char *key,
+		int val)
+{
+	char ns[21];
+	snprintf((char *)&ns, sizeof(ns), "%d", val);
+	return packit_add_header(p, key, (const char *)&ns);
 }
 
 struct packit_record *packit_get_header(struct packit *p, const char *key)
