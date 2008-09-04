@@ -1,4 +1,5 @@
 #include "tcpc.h"
+#include "packits/packits.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -26,6 +27,11 @@ static struct sigaction act = {
 /*******************/
 
 /* callbacks */
+ssize_t packits_send_h(const void *buf, size_t len, void *arg)
+{
+	return tcpc_server_send_to((struct tcpc_server_conn *)arg, buf, len, 0);
+}
+
 /* called when a server connection is closed */
 void conn_close(struct tcpc_server_conn *c)
 {
@@ -57,17 +63,27 @@ PT_THREAD(conn_h(struct tcpc_server_conn *c, size_t len))
 /* called when a new client has connected */
 void new_conn(struct tcpc_server_conn *c)
 {
-	const char *greeting = "Hello from TCPC\r\n";
+	struct packit *p = packit_new();
 
 	printf("New Connection: %08x\n",
 		ntohl(((struct sockaddr_in *)c->conn_addr)->sin_addr.s_addr));
+
 	/* a new client has connected, so fill in the callbacks */
 	c->conn_close_h = &conn_close;
 	c->conn_h = &conn_h;
-	printf("Connection_Count: %d\n",
+
+	if(p == NULL)
+		return;
+
+	packit_add_header(p, "Server-Type", "TCPC");
+	packit_add_uint_header(p, "Connection-Count",
 			tcpc_server_conn_count(tcpc_conn_server(c)));
-	if(tcpc_server_send_to(c, greeting, strlen(greeting), 0) < 0)
-		perror("Could not send data");
+	p->data = "Hello From TCPC!";
+	p->clen = strlen(p->data);
+
+	packit_send(p, &packits_send_h, c);
+
+	packit_free(p);
 }
 
 /* Main Routine */

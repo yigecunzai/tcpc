@@ -21,9 +21,11 @@
 
 /****************************************************************************/
 
+#include <stdlib.h>
+#include <string.h>
+
 #ifndef I__PACKITS_H__
 	#define I__PACKITS_H__
-
 
 /* Header Record Separator */
 #define PACKITS_RS		'\n'
@@ -31,8 +33,10 @@
 #define PACKITS_KV		':'
 /* Header Beginning Line */
 #define PACKITS_HEADER_START	"PACKIT\n"
+#define PACKITS_HEADER_START_L	7
 /* Header Ending Line - line separating header and content */
 #define PACKITS_HEADER_END	"\n"
+#define PACKITS_HEADER_END_L	1
 /* Max Key Size */
 #define PACKITS_MAX_KEY		64
 /* Max Value Size */
@@ -46,7 +50,8 @@
 struct packit_record {
 	struct packit_record *next;      /* hash table linked list of records */
 	struct packit_record *next_full; /* full linked list of records */
-	char key[PACKITS_MAX_KEY + 1];
+	char *rec;
+	char *key;
 	char *val;
 };
 
@@ -62,6 +67,36 @@ struct packit {
 
 
 /* Packits API */
+
+/* packit_new
+ *     RETURNS:
+ *         pointer to new packit on success
+ *         NULL on failure
+ */
+static inline struct packit *packit_new(void)
+{
+	struct packit *p;
+	p = (struct packit *)malloc(sizeof(struct packit));
+	if(p)
+		memset(p, 0, sizeof(struct packit));
+	return p;
+}
+
+/* packit_free
+ *     NOTE: you must free your own data if necessary
+ */
+static inline void packit_free(struct packit *p)
+{
+	struct packit_record *r, *lr;
+	r = p->headers_full;
+	while(r) {
+		lr = r;
+		r = r->next_full;
+		free(lr->rec);
+		free(lr);
+	}
+	free(p);
+}
 
 /* packit_add_header
  *     RETURNS:
@@ -93,6 +128,14 @@ struct packit_record *packit_add_int_header(struct packit *p, const char *key,
  *         NULL on failure
  */
 struct packit_record *packit_get_header(struct packit *p, const char *key);
+
+/* packit_get_key
+ *     RETURNS:
+ *         0 on success
+ */
+int packit_send(struct packit *p,
+		ssize_t (*txf)(const void *buf, size_t len, void *arg),
+		void *arg);
 
 /* forall_packit_headers
  */

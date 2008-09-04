@@ -39,5 +39,19 @@ int main(int argc, char *argv[])
 	if(r)
 		printf("%s => %s\n", r->key, r->val);
 
+	packit_send(&tp);
+
+	/* print all records */
+	forall_packit_headers(&tp, r) {
+		int i;
+		for(i=0;i < (strlen(r->key) + strlen(r->val) + 2); i++) {
+			if(r->rec[i] == '\0')
+				printf("<NULL>");
+			else
+				printf("%c",r->rec[i]);
+		}
+		printf("\n");
+	}
+
 	return 0;
 }
