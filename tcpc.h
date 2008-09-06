@@ -298,8 +298,6 @@ static inline void free_tcpc_client_members(struct tcpc_client *c)
 	/* always free everything. free does nothing with NULLs */
 	free(c->rxbuf);
 	free(c->serv_addr);
-	c->rxbuf = NULL;
-	c->serv_addr = NULL;
 }
 /****************************************************************************/
 

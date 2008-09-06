@@ -35,17 +35,18 @@ ssize_t packits_send_h(const void *buf, size_t len, void *arg)
 /* called when a server connection is closed */
 void conn_close(struct tcpc_server_conn *c)
 {
-	printf("Closing Connection: %08x\n",
+	/* printf("Closing Connection: %08x\n",
 		ntohl(((struct sockaddr_in *)c->conn_addr)->sin_addr.s_addr));
 	printf("Connection_Count: %d\n",
 			tcpc_server_conn_count(tcpc_conn_server(c)));
+			*/
 }
 
 /* server connection handler */
 PT_THREAD(conn_h(struct tcpc_server_conn *c, size_t len))
 {
 	if(len > 0) {
-		printf("New Data: %d\n",len);
+		//printf("New Data: %d\n",len);
 		if(tcpc_server_send_to(c, c->rxbuf, len, 0) < 0)
 			perror("Could not send data");
 	}
@@ -65,8 +66,8 @@ void new_conn(struct tcpc_server_conn *c)
 {
 	struct packit *p = packit_new();
 
-	printf("New Connection: %08x\n",
-		ntohl(((struct sockaddr_in *)c->conn_addr)->sin_addr.s_addr));
+	//printf("New Connection: %08x\n",
+	//	ntohl(((struct sockaddr_in *)c->conn_addr)->sin_addr.s_addr));
 
 	/* a new client has connected, so fill in the callbacks */
 	c->conn_close_h = &conn_close;
