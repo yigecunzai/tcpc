@@ -49,6 +49,7 @@ static inline void _tcpc_server_add_conn(struct tcpc_server *s,
 	if(s->_conns_ll)
 		s->_conns_ll->_prev = c;
 	s->_conns_ll = c;
+	s->_conn_count++;
 	pthread_mutex_unlock(&s->_conn_ll_mutex);
 }
 
@@ -73,6 +74,9 @@ static inline void _tcpc_server_remove_conn(struct tcpc_server *s,
 	 */
 	if(c->_next)
 		c->_next->_prev = c->_prev;
+
+	/* decrement the connection count in the parent */
+	s->_conn_count--;
 	pthread_mutex_unlock(&s->_conn_ll_mutex);
 }
 
@@ -123,9 +127,6 @@ static inline struct tcpc_server_conn *_setup_server_conn(struct tcpc_server *s)
 	}
 	/* add connection to list */
 	_tcpc_server_add_conn(s, nc);
-	pthread_mutex_lock(&s->_conn_count_mutex);
-	s->_conn_count++;
-	pthread_mutex_unlock(&s->_conn_count_mutex);
 	/* initialize the rx buffer mutex */
 	pthread_mutex_init(&nc->rxbuf_mutex, NULL);
 	/* call callback */
@@ -157,7 +158,7 @@ static void *server_conn_thread_routine(void *arg)
 	c->_poll.fd = c->_sock;
 	c->_poll.events = POLLRDHUP | POLLIN;
 
-	while(c->_active > 0) {
+	while(!c->_end_thread) {
 		l = 0; /* initialize length to 0 on each loop */
 		/* check for data in the socket */
 		c->_poll.revents = 0;
@@ -169,8 +170,7 @@ static void *server_conn_thread_routine(void *arg)
 		/* handle the revents */
 		if(c->_poll.revents & POLLRDHUP) {
 			/* connection has closed */
-			c->_active = 0;
-			continue;
+			break;
 		}
 		if(c->_poll.revents & POLLIN) {
 			/* data available */
@@ -179,8 +179,7 @@ static void *server_conn_thread_routine(void *arg)
 				pthread_mutex_unlock(&c->rxbuf_mutex);
 				if(l == 0) {
 					/* connection closed */
-					c->_active = 0;
-					continue;
+					break;
 				} else if(l < 0) {
 					/* error */
 					perror("server_conn_thread");
@@ -192,7 +191,7 @@ static void *server_conn_thread_routine(void *arg)
 		if(c->conn_h) {
 			if((c->conn_h)(c, (size_t)l) == PT_ENDED) {
 				/* connection thread has ended */
-				c->_active = 0;
+				break;
 			}
 		}
 	}
@@ -205,10 +204,6 @@ static void *server_conn_thread_routine(void *arg)
 	close(c->_sock);
 	/* remove from the linked list of connections */
 	_tcpc_server_remove_conn(c->_parent, c);
-	/* decrement the connection count in the parent */
-	pthread_mutex_lock(&c->_parent->_conn_count_mutex);
-	c->_parent->_conn_count--;
-	pthread_mutex_unlock(&c->_parent->_conn_count_mutex);
 	/* free the memory */
 	_free_tcpc_server_conn(c);
 
@@ -221,7 +216,7 @@ static void *listen_thread_routine(void *arg)
 	struct tcpc_server_conn *nc;
 	int e;
 
-	while(s->_active > 0) {
+	while(!s->_end_thread) {
 		e = poll(&s->_poll, 1, 100);
 		if(e == 0) {
 			/* nothing to do */
@@ -237,7 +232,6 @@ static void *listen_thread_routine(void *arg)
 			if((nc = _setup_server_conn(s)) == NULL)
 				continue;
 			/* start the connection thread */
-			nc->_active = 1;
 			if(pthread_create(&nc->_server_conn_thread, NULL, 
 					&server_conn_thread_routine, nc) != 0) {
 				perror("listen_thread");
@@ -255,7 +249,7 @@ static void *listen_thread_routine(void *arg)
 	/* clean up connections */
 	pthread_mutex_lock(&s->_conn_ll_mutex);
 	while(s->_conns_ll) {
-		s->_conns_ll->_active = 0;
+		s->_conns_ll->_end_thread = 1;
 		pthread_mutex_unlock(&s->_conn_ll_mutex);
 		/* give the thread a chance to exit */
 		sched_yield();
@@ -263,7 +257,7 @@ static void *listen_thread_routine(void *arg)
 	}
 	pthread_mutex_unlock(&s->_conn_ll_mutex);
 
-	s->_active = 0;
+	s->_state = TCPC_STATE_INACTIVE;
 
 	return NULL;
 }
@@ -275,7 +269,7 @@ static void *client_thread_routine(void *arg)
 
 	c->_poll.events = POLLRDHUP | POLLIN;
 
-	while(c->_active > 0) {
+	while(!c->_end_thread) {
 		l = 0; /* initialize length to 0 on each loop */
 		/* check for data in the socket */
 		c->_poll.revents = 0;
@@ -287,8 +281,7 @@ static void *client_thread_routine(void *arg)
 		/* handle the revents */
 		if(c->_poll.revents & POLLRDHUP) {
 			/* connection has closed */
-			c->_active = 0;
-			continue;
+			break;
 		}
 		if(c->_poll.revents & POLLIN) {
 			/* data available */
@@ -297,8 +290,7 @@ static void *client_thread_routine(void *arg)
 				pthread_mutex_unlock(&c->rxbuf_mutex);
 				if(l == 0) {
 					/* connection closed */
-					c->_active = 0;
-					continue;
+					break;
 				} else if(l < 0) {
 					/* error */
 					perror("client_thread");
@@ -309,8 +301,7 @@ static void *client_thread_routine(void *arg)
 		/* call the connection protothread */
 		if(c->conn_h) {
 			if((c->conn_h)(c, (size_t)l) == PT_ENDED) {
-				/* connection thread has ended */
-				c->_active = 0;
+				break;
 			}
 		}
 	}
@@ -326,7 +317,7 @@ static void *client_thread_routine(void *arg)
 		(c->conn_close_h)(c);
 
 	/* since everything is cleaned up, we can set our state to inactive */
-	c->_active = 0;
+	c->_state = TCPC_STATE_INACTIVE;
 
 	return NULL;
 }
@@ -353,7 +344,6 @@ int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
 
 	/* init the mutexes */
 	pthread_mutex_init(&s->_conn_ll_mutex, NULL);
-	pthread_mutex_init(&s->_conn_count_mutex, NULL);
 
 	/* set the default configurations */
 	s->max_connections = 100;
@@ -403,7 +393,7 @@ int tcpc_start_server(struct tcpc_server *s)
 	}
 
 	/* start the main listen thread */
-	s->_active = 1;
+	s->_state = TCPC_STATE_ACTIVE;
 	if(pthread_create(&s->_listen_thread, NULL, &listen_thread_routine, s)
 			!= 0) {
 		perror("tcpc_start_server");
@@ -418,7 +408,7 @@ void tcpc_close_server(struct tcpc_server *s)
 	/* tell the main listen thread to end and wait for it to join. it will
 	 * take care of closing all the connections and joining those threads
 	 */
-	s->_active = -1;
+	s->_end_thread = 1;
 	pthread_join(s->_listen_thread, NULL);
 	close(s->_sock);
 	s->_sock = -1;
@@ -515,7 +505,7 @@ int tcpc_start_client(struct tcpc_client *c)
 	}
 
 	/* start the client thread */
-	c->_active = 1;
+	c->_state = TCPC_STATE_ACTIVE;
 	if(pthread_create(&c->_client_thread, NULL, &client_thread_routine, c)
 			!= 0) {
 		perror("tcpc_start_client");
@@ -532,8 +522,8 @@ int tcpc_start_client(struct tcpc_client *c)
  */
 void tcpc_close_client(struct tcpc_client *c)
 {
-	if(c->_active > 0) {
-		c->_active = -1;
-		while(c->_active != 0);
+	if(c->_state == TCPC_STATE_ACTIVE) {
+		c->_end_thread = 1;
+		while(c->_state == TCPC_STATE_ACTIVE);
 	}
 }

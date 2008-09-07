@@ -36,6 +36,9 @@
 #define TCPC_DEFAULT_BUF_SZ	1024
 #define TCPC_DEFAULT_POLL_TO	10
 
+#define TCPC_STATE_ACTIVE	1
+#define TCPC_STATE_INACTIVE	0
+
 /* SERVER FRAMEWORK */
 /****************************************************************************
  * struct tcpc_server_conn
@@ -76,7 +79,7 @@ struct tcpc_server_conn {
 	/* private members - don't modify directly */
 	int _sock;
 	size_t _sockaddr_size;
-	volatile int _active;
+	volatile int _end_thread;
 	pthread_t _server_conn_thread;
 	struct pollfd _poll;
 	struct tcpc_server *_parent;
@@ -128,11 +131,10 @@ struct tcpc_server {
 
 	pthread_mutex_t _conn_ll_mutex; /* connection linked list mutex */
 	struct tcpc_server_conn *_conns_ll; /* connection linked list */
-
-	pthread_mutex_t _conn_count_mutex; /* connection count mutex */
 	int _conn_count; /* master connection count for server */
 
-	volatile int _active; /* server will listen until false */
+	volatile int _state;
+	volatile int _end_thread;
 	pthread_t _listen_thread;
 
 	struct pollfd _poll;
@@ -259,7 +261,8 @@ struct tcpc_client {
 	/* private members - don't modify directly */
 	int _sock; /* client socket */
 
-	volatile int _active; /* client will stay connected until false */
+	volatile int _state;
+	volatile int _end_thread;
 	pthread_t _client_thread;
 
 	struct pollfd _poll;

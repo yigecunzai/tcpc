@@ -105,7 +105,7 @@ int main(int argc,char *argv[])
 
 	while(!stop_test) {
 		for(i = 0; i < SERVER_CONNECTIONS; i++) {
-			if(conns[i]._active == 1)
+			if(conns[i]._state == TCPC_STATE_ACTIVE)
 				continue;
 
 			if(tcpc_open_client(&conns[i]) < 0) {
@@ -125,8 +125,8 @@ int main(int argc,char *argv[])
 			}
 			test_count++;
 		}
-		//sched_yield();
-		sleep(1);
+		sched_yield();
+		//sleep(1);
 		if(test_count%100 == 0) {
 			printf("Test Count: %d\n", test_count);
 		}
