@@ -59,19 +59,18 @@ struct packit_record *packit_add_header(struct packit *p, const char *key,
 	h = hash(key);
 
 	/* check for existing key */
-	nr = p->headers[h];
-	while(nr) {
-		if(strcmp(key, nr->key) == 0)
+	list_for_each_entry(nr, &p->hash_head[h], hash_list) {
+		if(strcmp(key, nr->key) == 0) {
 			break;
-		nr = nr->next;
+		}
 	}
 
-	if(nr) { /* key already existed */
-		free(nr->rec);
-		nr->rec = NULL;
+	if(&nr->hash_list != &p->hash_head[h]) { /* key already existed */
+		free(nr->_rec);
+		nr->_rec = NULL;
 		nr->key = NULL;
 		nr->val = NULL;
-	} else {
+	} else { /* key did not exist */
 		/* allocate record */
 		nr = (struct packit_record *)
 				malloc(sizeof(struct packit_record));
@@ -80,20 +79,20 @@ struct packit_record *packit_add_header(struct packit *p, const char *key,
 		}
 		memset(nr, 0, sizeof(struct packit_record));
 
-		/* insert at beginning */
-		nr->next = p->headers[h];
-		p->headers[h] = nr;
-		nr->next_full = p->headers_full;
-		p->headers_full = nr;
+		/* insert */
+		list_add_tail(&nr->hash_list, &p->hash_head[h]);
+		list_add_tail(&nr->full_list, &p->full_head);
 	}
 
 	/* allocate rec */
-	if((nr->rec = (char *)malloc(keylen + 1 + vallen + 1)) == NULL) {
+	if((nr->_rec = (char *)malloc(keylen + 1 + vallen + 1)) == NULL) {
+		list_del(&nr->hash_list);
+		list_del(&nr->full_list);
 		free(nr);
 		return NULL;
 	}
-	nr->key = nr->rec;
-	nr->val = nr->rec + keylen + 1;
+	nr->key = nr->_rec;
+	nr->val = nr->_rec + keylen + 1;
 	/* copy key */
 	strcpy(nr->key, key);
 	/* copy val */
@@ -120,16 +119,17 @@ struct packit_record *packit_add_int_header(struct packit *p, const char *key,
 
 struct packit_record *packit_get_header(struct packit *p, const char *key)
 {
-	struct packit_record *r;
+	struct packit_record *r,*f = NULL;
+	unsigned int h = hash(key);
 
-	r = p->headers[hash(key)];
-	while(r) {
-		if(strcmp(key, r->key) == 0)
+	list_for_each_entry(r, &p->hash_head[h], hash_list) {
+		if(strcmp(key, r->key) == 0) {
+			f = r;
 			break;
-		r = r->next;
+		}
 	}
 
-	return r;
+	return f;
 }
 
 int packit_send(struct packit *p,
@@ -149,15 +149,15 @@ int packit_send(struct packit *p,
 		size_t sep = strlen(r->key);
 		size_t term = strlen(r->val) + sep + 1;
 		/* make the key/value into single record to send */
-		r->rec[sep]=PACKITS_KV;
-		r->rec[term]=PACKITS_RS;
+		r->_rec[sep]=PACKITS_KV;
+		r->_rec[term]=PACKITS_RS;
 		/* send the packet */
-		if((*txf)(r->rec, term + 1, arg) <= 0) {
+		if((*txf)(r->_rec, term + 1, arg) <= 0) {
 			return -1;
 		}
 		/* fix the record back to separate key/value valid strings */
-		r->rec[sep]='\0';
-		r->rec[term]='\0';
+		r->_rec[sep]='\0';
+		r->_rec[term]='\0';
 	}
 	
 	/* end of header */

@@ -23,6 +23,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include "ll.h"
 
 #ifndef I__PACKITS_H__
 	#define I__PACKITS_H__
@@ -48,22 +49,28 @@
 
 /* Packits Header Record */
 struct packit_record {
-	struct packit_record *next;      /* hash table linked list of records */
-	struct packit_record *next_full; /* full linked list of records */
-	char *rec;
+	ll_t hash_list; /* hash table linked list of records */
+	ll_t full_list; /* full linked list of records */
 	char *key;
 	char *val;
+	char *_rec;
+	size_t _rec_size;
 };
 
 #define PACKITS_HASH_SIZE	32
 
 /* Packit Structure */
 struct packit {
-	struct packit_record *headers[PACKITS_HASH_SIZE];
-	struct packit_record *headers_full;
+	ll_t hash_head[PACKITS_HASH_SIZE];
+	ll_t full_head;
 	unsigned int clen;
 	char *data;
 };
+
+/* Packit Interface Structure */
+/* struct packit_if {
+	char pbuf[PACKITS_MAX_KEY + PACKITS_MAX_HVAL + 2];
+};*/
 
 
 /* Packits API */
@@ -76,24 +83,27 @@ struct packit {
 static inline struct packit *packit_new(void)
 {
 	struct packit *p;
-	p = (struct packit *)malloc(sizeof(struct packit));
-	if(p)
-		memset(p, 0, sizeof(struct packit));
+	unsigned int i;
+	if((p = (struct packit *)malloc(sizeof(struct packit))) == NULL)
+		return NULL;
+	for(i = 0; i < PACKITS_HASH_SIZE; i++) {
+		INIT_LIST_HEAD(&p->hash_head[i]);
+	}
+	INIT_LIST_HEAD(&p->full_head);
 	return p;
 }
 
 /* packit_free
- *     NOTE: you must free your own data if necessary
+ *     NOTE: you must free your own data if necessary BEFORE this call
  */
 static inline void packit_free(struct packit *p)
 {
-	struct packit_record *r, *lr;
-	r = p->headers_full;
-	while(r) {
-		lr = r;
-		r = r->next_full;
-		free(lr->rec);
-		free(lr);
+	while(!list_empty(&p->full_head)) {
+		struct packit_record *r = list_first_entry(&p->full_head,
+				struct packit_record, full_list);
+		list_del(&r->full_list);
+		free(r->_rec);
+		free(r);
 	}
 	free(p);
 }
@@ -132,7 +142,12 @@ struct packit_record *packit_get_header(struct packit *p, const char *key);
 /* packit_get_key
  *     RETURNS:
  *         0 on success
+ *         -1 on failure
+ *
+ *         **buf and *len will be filled in with the packet to send. you must
+ *         free buf when you are done with it.
  */
+//int packit_send(struct packit *p, void **buf, size_t *len);
 int packit_send(struct packit *p,
 		ssize_t (*txf)(const void *buf, size_t len, void *arg),
 		void *arg);
@@ -140,7 +155,7 @@ int packit_send(struct packit *p,
 /* forall_packit_headers
  */
 #define forall_packit_headers(packitp, recordp) \
-	for((recordp) = (packitp)->headers_full; (recordp); \
-			(recordp) = (recordp)->next_full)
+	list_for_each_entry(recordp, &(packitp)->full_head, \
+			full_list)
 
 #endif /* I__PACKITS_H__ */
