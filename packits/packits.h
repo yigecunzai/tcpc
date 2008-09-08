@@ -49,8 +49,8 @@
 
 /* Packits Header Record */
 struct packit_record {
-	ll_t hash_list; /* hash table linked list of records */
-	ll_t full_list; /* full linked list of records */
+	hl_node_t hash_list;	/* hash table linked list of records */
+	ll_t full_list;		/* full linked list of records */
 	char *key;
 	char *val;
 	char *_rec;
@@ -61,7 +61,7 @@ struct packit_record {
 
 /* Packit Structure */
 struct packit {
-	ll_t hash_head[PACKITS_HASH_SIZE];
+	hl_head_t hash_head[PACKITS_HASH_SIZE];
 	ll_t full_head;
 	unsigned int clen;
 	char *data;
@@ -87,7 +87,7 @@ static inline struct packit *packit_new(void)
 	if((p = (struct packit *)malloc(sizeof(struct packit))) == NULL)
 		return NULL;
 	for(i = 0; i < PACKITS_HASH_SIZE; i++) {
-		INIT_LIST_HEAD(&p->hash_head[i]);
+		INIT_HLIST_HEAD(&p->hash_head[i]);
 	}
 	INIT_LIST_HEAD(&p->full_head);
 	return p;
@@ -98,9 +98,8 @@ static inline struct packit *packit_new(void)
  */
 static inline void packit_free(struct packit *p)
 {
-	while(!list_empty(&p->full_head)) {
-		struct packit_record *r = list_first_entry(&p->full_head,
-				struct packit_record, full_list);
+	struct packit_record *r,*n;
+	list_for_each_entry_safe(r, n, &p->full_head, full_list) {
 		list_del(&r->full_list);
 		free(r->_rec);
 		free(r);
@@ -137,7 +136,8 @@ struct packit_record *packit_add_int_header(struct packit *p, const char *key,
  *         pointer to packit_record on success
  *         NULL on failure
  */
-struct packit_record *packit_get_header(struct packit *p, const char *key);
+struct packit_record *packit_get_header(const struct packit *p,
+		const char *key);
 
 /* packit_get_key
  *     RETURNS:

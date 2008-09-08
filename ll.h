@@ -51,7 +51,7 @@
 /* list_entry - get the struct for this entry
  * ptr:		the ll_t pointer
  * type:	the type of structure this is embedded in
- * member:	the name of the head within the struct
+ * member:	the name of the node within the struct
  */
 #define list_entry(ptr, type, member)	container_of(ptr, type, member)
 
@@ -70,6 +70,15 @@
 #define list_for_each(pos, head) \
 	for(pos = (head)->next; pos != (head); pos = pos->next)
 
+/* list_for_each_safe - iterate over a list safe against removal of list entry
+ * pos:		the the ll_t pointer to use as a loop cursor.
+ * n:		another ll_t pointer to use as temporary storage
+ * head:	the head for your list.
+ */
+#define list_for_each_safe(pos, n, head) \
+	for(pos = (head)->next, n = pos->next; pos != (head); \
+		pos = n, n = pos->next)
+
 /* list_for_each_entry - iterate over a list of given type
  * pos:		the type pointer to use as a loop cursor
  * head:	the head of the list
@@ -79,12 +88,26 @@
 	for(pos = list_entry((head)->next, typeof(*pos), member);	\
 		&pos->member != (head);					\
 		pos = list_entry(pos->member.next, typeof(*pos), member))
+
+/* list_for_each_entry_safe - iterate over list of given type safe against
+ *                            removal of list entry
+ * pos:		the type pointer to use as a loop cursor
+ * n:		another type pointer to use as temporary storage
+ * head:	the head of the list
+ * member:	the name of the ll_t within the type
+ */
+#define list_for_each_entry_safe(pos, n, head, member)			\
+	for (pos = list_entry((head)->next, typeof(*pos), member),	\
+		n = list_entry(pos->member.next, typeof(*pos), member);	\
+		&pos->member != (head);					\
+		pos = n, n = list_entry(n->member.next, typeof(*n), member))
+
 #endif /* __GNUC__ */
 
 
 /* ll_t - linked list type. embed in data structures you wish to list */
-typedef struct linked_list {
-	struct linked_list *next, *prev;
+typedef struct list_head {
+	struct list_head *next, *prev;
 } ll_t;
 
 
@@ -214,5 +237,148 @@ static inline int list_empty(const ll_t *head)
 {
 	return head->next == head;
 }
+
+
+/*******************************************************************************
+ * HLIST
+ * Doubly linked lists with a single pointer list head. Mostly useful for hash
+ * tables where the two pointer list head is too wasteful. You lose the
+ * ability to access the tail in O(1).
+ */
+
+typedef struct hlist_node {
+	struct hlist_node *next, **pprev;
+} hl_node_t;
+
+typedef struct hlist_head {
+	hl_node_t *first;
+} hl_head_t;
+
+
+/* INIT */
+
+#define HLIST_HEAD_INIT		{ .first = NULL }
+#define HLIST_HEAD(name)	hl_head_t name = HLIST_HEAD_INIT
+#define INIT_HLIST_HEAD(ptr)	((ptr)->first = NULL)
+static inline void INIT_HLIST_NODE(hl_node_t *h)
+{
+	h->next = NULL;
+	h->pprev = NULL;
+}
+
+
+/* TEST */
+
+static inline int hlist_unhashed(const hl_node_t *h)
+{
+	return !h->pprev;
+}
+
+static inline int hlist_empty(const hl_head_t *h)
+{
+	return !h->first;
+}
+
+
+/* DELETE */
+
+static inline void __hlist_del(hl_node_t *n)
+{
+	hl_node_t *next = n->next;
+	hl_node_t **pprev = n->pprev;
+	*pprev = next;
+	if(next)
+		next->pprev = pprev;
+}
+
+static inline void hlist_del(hl_node_t *n)
+{
+	__hlist_del(n);
+	n->next = NULL;
+	n->pprev = NULL;
+}
+
+
+/* ADD */
+
+static inline void hlist_add_head(hl_node_t *n, hl_head_t *h)
+{
+	hl_node_t *first = h->first;
+	n->next = first;
+	if(first)
+		first->pprev = &n->next;
+	h->first = n;
+	n->pprev = &h->first;
+}
+
+static inline void hlist_add_before(hl_node_t *n, hl_node_t *next)
+{
+	n->pprev = next->pprev;
+	n->next = next;
+	next->pprev = &n->next;
+	*(n->pprev) = n;
+}
+
+static inline void hlist_add_after(hl_node_t *n, hl_node_t *prev)
+{
+	n->next = prev->next;
+	prev->next = n;
+	n->pprev = &prev->next;
+
+	if(n->next)
+		n->next->pprev = &n->next;
+}
+
+
+#if __GNUC__
+
+/* hlist_entry - get the struct for this entry
+ * ptr:		the node pointer
+ * type:	the type of structure this is embedded in
+ * member:	the name of the node within the struct
+ */
+#define hlist_entry(ptr, type, member)	container_of(ptr, type, member)
+
+/* hlist_for_each - iterate over a list
+ * pos:		the node pointer to use as a loop cursor
+ * head:	the head of the list
+ */
+#define hlist_for_each(pos, head) \
+	for(pos = (head)->first; pos; pos = pos->next)
+
+/* hlist_for_each_safe - iterate over a list safe against removal of list entry
+ * pos:		the the node pointer to use as a loop cursor.
+ * n:		another node pointer to use as temporary storage
+ * head:	the head for your list.
+ */
+#define hlist_for_each_safe(pos, n, head) \
+	for(pos = (head)->first; pos && ({ n = pos->next; 1; }); pos = n)
+
+/* hlist_for_each_entry - iterate over a list of given type
+ * tpos:	the type pointer to use as a loop cursor
+ * pos:		the node pointer to use as a loop cursor
+ * head:	the head of the list
+ * member:	the name of the node within the type
+ */
+#define hlist_for_each_entry(tpos, pos, head, member)			\
+	for(pos = (head)->first;					\
+		pos && 							\
+		({ tpos = hlist_entry(pos, typeof(*tpos), member); 1; }); \
+		pos = pos->next)
+
+/* hlist_for_each_entry_safe - iterate over list of given type safe against
+ *                             removal of list entry
+ * tpos:	the type pointer to use as a loop cursor
+ * pos:		the node pointer to use as a loop cursor
+ * n:		another node pointer to use as temporary storage
+ * head:	the head of the list
+ * member:	the name of the node within the type
+ */
+#define hlist_for_each_entry_safe(tpos, pos, n, head, member)		\
+	for(pos = (head)->first; pos && ({ n = pos->next; 1; }) &&	\
+		({ tpos = hlist_entry(pos, typeof(*tpos), member); 1; }); \
+		pos = n)
+
+#endif /* __GNUC__ */
 
 #endif /* I__LL_H__ */

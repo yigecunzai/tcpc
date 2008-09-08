@@ -39,6 +39,21 @@ static inline unsigned int hash(const char *str)
 	return h % PACKITS_HASH_SIZE;
 }
 
+static inline struct packit_record *__packit_get_header(const struct packit *p,
+		const char *key, unsigned int hash)
+{
+	struct packit_record *r;
+	hl_node_t *n;
+
+	hlist_for_each_entry(r, n, &p->hash_head[hash], hash_list) {
+		if(strcmp(key, r->key) == 0) {
+			return r;
+		}
+	}
+
+	return NULL;
+}
+
 
 /* API FUNCTIONS */
 struct packit_record *packit_add_header(struct packit *p, const char *key,
@@ -59,13 +74,9 @@ struct packit_record *packit_add_header(struct packit *p, const char *key,
 	h = hash(key);
 
 	/* check for existing key */
-	list_for_each_entry(nr, &p->hash_head[h], hash_list) {
-		if(strcmp(key, nr->key) == 0) {
-			break;
-		}
-	}
+	nr = __packit_get_header(p, key, h);
 
-	if(&nr->hash_list != &p->hash_head[h]) { /* key already existed */
+	if(nr) { /* key already existed */
 		free(nr->_rec);
 		nr->_rec = NULL;
 		nr->key = NULL;
@@ -80,13 +91,13 @@ struct packit_record *packit_add_header(struct packit *p, const char *key,
 		memset(nr, 0, sizeof(struct packit_record));
 
 		/* insert */
-		list_add_tail(&nr->hash_list, &p->hash_head[h]);
+		hlist_add_head(&nr->hash_list, &p->hash_head[h]);
 		list_add_tail(&nr->full_list, &p->full_head);
 	}
 
 	/* allocate rec */
 	if((nr->_rec = (char *)malloc(keylen + 1 + vallen + 1)) == NULL) {
-		list_del(&nr->hash_list);
+		hlist_del(&nr->hash_list);
 		list_del(&nr->full_list);
 		free(nr);
 		return NULL;
@@ -117,19 +128,9 @@ struct packit_record *packit_add_int_header(struct packit *p, const char *key,
 	return packit_add_header(p, key, (const char *)&ns);
 }
 
-struct packit_record *packit_get_header(struct packit *p, const char *key)
+struct packit_record *packit_get_header(const struct packit *p, const char *key)
 {
-	struct packit_record *r,*f = NULL;
-	unsigned int h = hash(key);
-
-	list_for_each_entry(r, &p->hash_head[h], hash_list) {
-		if(strcmp(key, r->key) == 0) {
-			f = r;
-			break;
-		}
-	}
-
-	return f;
+	return __packit_get_header(p, key, hash(key));
 }
 
 int packit_send(struct packit *p,
