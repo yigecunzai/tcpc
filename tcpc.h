@@ -78,7 +78,7 @@ struct tcpc_server_conn {
 
 	/* private members - don't modify directly */
 	int _sock;
-	size_t _sockaddr_size;
+	socklen_t _sockaddr_size;
 	volatile int _end_thread;
 	pthread_t _server_conn_thread;
 	struct pollfd _poll;
@@ -127,7 +127,7 @@ struct tcpc_server {
 	/* private members - don't modify directly */
 	int _sock; /* server socket */
 
-	size_t _sockaddr_size; /* size of sockaddr structure */
+	socklen_t _sockaddr_size; /* size of sockaddr structure */
 
 	pthread_mutex_t _conn_ll_mutex; /* connection linked list mutex */
 	struct tcpc_server_conn *_conns_ll; /* connection linked list */
@@ -176,7 +176,7 @@ static inline void free_tcpc_server_members(struct tcpc_server *s)
  * 		errors: errno will be set with specific error information
  * 		-1	- error
  */
-int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
+int tcpc_init_server(struct tcpc_server *s, socklen_t sockaddr_size,
 		void (*new_conn_h)(struct tcpc_server_conn *));
 
 /* tcpc_open_server
@@ -267,7 +267,7 @@ struct tcpc_client {
 
 	struct pollfd _poll;
 
-	size_t _sockaddr_size;
+	socklen_t _sockaddr_size;
 	size_t _rxbuf_sz;
 };
 
@@ -280,7 +280,7 @@ struct tcpc_client {
  * 		errors: errno will be set with specific error information
  * 		-1	- error
  */
-int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
+int tcpc_init_client(struct tcpc_client *c, socklen_t sockaddr_size,
 		size_t rxbuf_sz,
 		PT_THREAD((*conn_h)(struct tcpc_client *, size_t len)),
 		void (*conn_close_h)(struct tcpc_client *));

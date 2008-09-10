@@ -325,14 +325,15 @@ static void *client_thread_routine(void *arg)
 
 /* API FUNCTIONS */
 /* SERVER FRAMEWORK */
-int tcpc_init_server(struct tcpc_server *s, size_t sockaddr_size,
+int tcpc_init_server(struct tcpc_server *s, socklen_t sockaddr_size,
 		void (*new_conn_h)(struct tcpc_server_conn *))
 {
 	/* clear the structure */
 	memset(s, 0, sizeof(struct tcpc_server));
 
 	/* allocate the sockaddr */
-	if((s->serv_addr = (struct sockaddr *)malloc(sockaddr_size))==NULL) {
+	if((s->serv_addr = (struct sockaddr *)malloc((size_t)sockaddr_size))
+			== NULL) {
 		perror("tcpc_init_server");
 		return -1;
 	}
@@ -416,7 +417,7 @@ void tcpc_close_server(struct tcpc_server *s)
 }
 
 /* CLIENT FRAMEWORK */
-int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
+int tcpc_init_client(struct tcpc_client *c, socklen_t sockaddr_size,
 		size_t rxbuf_sz,
 		PT_THREAD((*conn_h)(struct tcpc_client *, size_t len)),
 		void (*conn_close_h)(struct tcpc_client *))
@@ -425,7 +426,8 @@ int tcpc_init_client(struct tcpc_client *c, size_t sockaddr_size,
 	memset(c, 0, sizeof(struct tcpc_client));
 
 	/* allocate the sockaddr */
-	if((c->serv_addr = (struct sockaddr *)malloc(sockaddr_size))==NULL) {
+	if((c->serv_addr = (struct sockaddr *)malloc((size_t)sockaddr_size))
+			== NULL) {
 		perror("tcpc_init_client");
 		return -1;
 	}
